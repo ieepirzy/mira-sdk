@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mira-sdk"
 version = "0.1.0"
-description = "Client SDK for agent processes in the Mira ecosystem: run-scoped telemetry export over OTLP, correlated with MiraRun/MiraGen run identity."
+description = "Client SDK for the Mira ecosystem: run-scoped OTLP telemetry (mira_sdk.telemetry) and a standalone environment driver toolkit (mira_sdk.driver) for Docker/Portainer/Kubernetes discovery, reporting into MiraRun's environment model."
 authors = [
   { name = "ieepirzy", email = "nervy_colder_1m@icloud.com" }
 ]
@@ -28,7 +28,12 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "pytest-cov"]
+# mira_sdk.driver is intentionally not a core dependency: telemetry-only
+# consumers (the overwhelmingly common case — any ordinary service just
+# adding tracing) should not need to pull in an HTTP client meant for
+# driving Docker sockets they'll never touch.
+driver = ["httpx>=0.27"]
+dev = ["pytest", "pytest-asyncio", "pytest-cov", "httpx>=0.27"]
 
 [project.urls]
 Homepage = "https://github.com/ieepirzy/mira-sdk"
