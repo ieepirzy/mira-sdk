@@ -84,7 +84,7 @@ def test_span_sets_call_attributes_and_drops_none_values():
     assert "mira.capability" not in span.attributes
 
 
-def test_span_records_exception_and_reraises():
+def test_span_records_exception_exactly_once_and_reraises():
     exporter = InMemorySpanExporter()
     telemetry = _telemetry(exporter)
 
@@ -95,7 +95,33 @@ def test_span_records_exception_and_reraises():
 
     span = exporter.get_finished_spans()[0]
     assert span.status.status_code == StatusCode.ERROR
-    assert any(event.name == "exception" for event in span.events)
+    exception_events = [e for e in span.events if e.name == "exception"]
+    # start_as_current_span already records the exception by default
+    # (record_exception=True); span() must not duplicate that itself.
+    assert len(exception_events) == 1
+
+
+def test_shutdown_calls_force_flush_with_the_given_timeout():
+    # TracerProvider.shutdown() itself takes no caller-controlled timeout —
+    # it always waits its own fixed internal default. The bound
+    # MiraTelemetry.shutdown(timeout_millis=...) promises has to come from
+    # calling provider.force_flush(timeout_millis) first; spy on the real
+    # TracerProvider's own method (not the exporter — force_flush does not
+    # call the exporter's force_flush(), it drains the internal queue via
+    # export() on its own fixed export_timeout_millis, independent of this
+    # value) to verify this module actually does that.
+    telemetry = _telemetry(InMemorySpanExporter())
+    calls: list[int] = []
+    original = telemetry._provider.force_flush
+
+    def spy(timeout_millis: int = 30000) -> bool:
+        calls.append(timeout_millis)
+        return original(timeout_millis)
+
+    telemetry._provider.force_flush = spy
+    telemetry.shutdown(timeout_millis=1234)
+
+    assert calls == [1234]
 
 
 def test_export_stats_track_failed_batches():

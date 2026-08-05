@@ -28,7 +28,6 @@ from opentelemetry.sdk.trace.export import (
     SpanExporter,
     SpanExportResult,
 )
-from opentelemetry.trace import Status, StatusCode
 
 logger = logging.getLogger("mira_sdk.telemetry")
 
@@ -147,28 +146,29 @@ class MiraTelemetry:
         without every call site needing its own filter.
 
         An exception raised inside the `with` block is recorded on the span
-        (status + exception event) and re-raised unchanged — this never
-        swallows the caller's own error, it only ever fails to *report* one
-        quietly if the export itself later fails.
+        and its status set to ERROR by `start_as_current_span`'s own default
+        behavior (`record_exception=True`, `set_status_on_exception=True`)
+        — not duplicated here — and always re-raised unchanged; a context
+        manager never swallows an exception it doesn't itself catch.
         """
         with self._tracer.start_as_current_span(name) as span:
             for key, value in attributes.items():
                 if value is not None:
                     span.set_attribute(key, value)
-            try:
-                yield span
-            except Exception as error:
-                span.record_exception(error)
-                span.set_status(Status(StatusCode.ERROR, str(error)))
-                raise
+            yield span
 
     def shutdown(self, timeout_millis: int = 5000) -> None:
-        """Flush queued spans and stop the background export thread.
+        """Flush queued spans (bounded by `timeout_millis`) and stop the
+        background export thread.
 
-        Call once, at process exit — not per-span or per-turn. Blocks up to
-        `timeout_millis` waiting for the final flush; a hung/unreachable
-        endpoint delays shutdown by at most that long, never indefinitely.
+        Call once, at process exit — not per-span or per-turn.
+        `TracerProvider.shutdown()` itself takes no caller-controlled
+        timeout in the OTel SDK (it always waits its own fixed internal
+        default); the bound this method actually promises comes from
+        calling `force_flush(timeout_millis)` first, so a hung/unreachable
+        endpoint delays exit by at most that long, not OTel's default.
         """
+        self._provider.force_flush(timeout_millis)
         self._provider.shutdown()
 
 
