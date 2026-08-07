@@ -64,6 +64,17 @@ services and change them just because they happen to emit telemetry.
 
 ## Open design question (mirarun-side, not decided here)
 
+> **Resolved for driver-reported targets** by mirarun's ADR-022 (accepted
+> 2026-08-05): push. The operator registers a target with reachability
+> `reported`; the one-time creation response carries a deploy-lifetime
+> report credential; the driver POSTs its inventory to
+> `POST /api/target-environments/{id}/report` on its own schedule, and
+> mirarun answers agent queries from that cache. The SDK side of that loop
+> is `mira_sdk.driver.runner` + `MirarunReportSink` (below). Log tailing
+> for reported targets remains open (it needs a reverse channel), and
+> *self-registered service targets* remain open — the discussion below is
+> kept for that half.
+
 How does mirarun *learn* a self-registered or driver-reported target
 exists, and how does it *reach* it to answer a query?
 
@@ -96,8 +107,24 @@ question than ADR-021's credential mechanism was. Not resolved here.
   bounded list/inspect/logs, orphan handling — the same bounded read-only
   contract ADR-017 established, reimplemented here because a driver
   process needs it standalone (not a mirarun-internal call).
+- `mira_sdk.driver.runner` — implemented: the report loop (ADR-022's
+  node-side half). Polls a driver on a schedule, detects container
+  death/OOM/restart between cycles (with a bounded post-mortem log tail),
+  and publishes to isolated sinks.
+- `mira_sdk.driver.sinks` — implemented: `MirarunReportSink` (ADR-022
+  `/report` contract, for hosts mirarun cannot reach) and
+  `AdminCollectorSink` (movingfirm-admin's collector contract).
+- `mira_sdk.driver.metrics` — implemented: host metrics from procfs with
+  OpenTelemetry semantic-convention names/units. The names are the
+  vocabulary contract; the wire stays each sink's concern until a real
+  OTLP metrics pipeline exists.
+- `mira_sdk.driver.process` — implemented: env-var configuration and the
+  `mira-driver` console entrypoint; the only module in the SDK that reads
+  the environment. `deploy/` carries the reference compose stack (read-only
+  socket proxy + driver).
 - `mira_sdk.driver.kubernetes` — not implemented. Nothing in the Mira
   ecosystem implements Kubernetes discovery anywhere yet; scaffolding it
   blind without a cluster to validate against would just be guessing.
-- Phone-home transport (driver → mirarun, and self-registration) — not
-  implemented; blocked on the open design question above.
+- Self-registration for telemetry-embedding services — not implemented;
+  still blocked on the open design question above (ADR-022 explicitly
+  deferred it).

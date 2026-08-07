@@ -19,12 +19,14 @@ from typing import Any
 import httpx
 
 from mira_sdk.driver.base import (
+    DriverContainerStats,
     DriverLogEntry,
     DriverLogResult,
     DriverOperationInvalid,
     DriverProtocolError,
     DriverResource,
     DriverResourceDetails,
+    DriverResourceNotFound,
     DriverResourceQuery,
     DriverUnavailable,
 )
@@ -69,6 +71,20 @@ class DockerDriver:
         self._endpoint = endpoint
         self._client_factory = client_factory
         self._timeout = httpx.Timeout(timeout_seconds)
+        self._client_instance: httpx.Client | None = None
+
+    def close(self) -> None:
+        """Close the underlying HTTP client. The driver remains usable — the
+        next request opens a fresh client."""
+        if self._client_instance is not None:
+            self._client_instance.close()
+            self._client_instance = None
+
+    def __enter__(self) -> "DockerDriver":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
     def query(self, query: DriverResourceQuery) -> list[DriverResource]:
         containers = self._list_containers()
@@ -111,12 +127,9 @@ class DockerDriver:
         container = _container_from_inspect(document)
         _assert_matches(address, container)
         state = document.get("State")
-        config = document.get("Config")
         network_settings = document.get("NetworkSettings")
         if not isinstance(state, dict):
             state = {}
-        if not isinstance(config, dict):
-            config = {}
         if not isinstance(network_settings, dict):
             network_settings = {}
         health_document = state.get("Health")
@@ -131,6 +144,12 @@ class DockerDriver:
         created_at = _bounded_optional(
             document.get("Created"), maximum=128, field="created timestamp"
         )
+        exit_code = state.get("ExitCode")
+        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+            exit_code = None
+        oom_killed = state.get("OOMKilled")
+        if not isinstance(oom_killed, bool):
+            oom_killed = None
         return DriverResourceDetails(
             resource=self._container_resource(container),
             created_at=created_at,
@@ -138,6 +157,10 @@ class DockerDriver:
             restart_count=restart_count,
             ports=_safe_ports(network_settings.get("Ports")),
             networks=_safe_networks(network_settings.get("Networks")),
+            exit_code=exit_code,
+            oom_killed=oom_killed,
+            started_at=_lifecycle_timestamp(state.get("StartedAt")),
+            finished_at=_lifecycle_timestamp(state.get("FinishedAt")),
         )
 
     def logs(self, uri: str, *, tail: int) -> DriverLogResult:
@@ -160,27 +183,53 @@ class DockerDriver:
         _assert_matches(address, container)
         config = inspect.get("Config")
         tty = bool(config.get("Tty")) if isinstance(config, dict) else False
-        client = self._client()
-        try:
-            payload, truncated = _read_response(
-                client,
-                f"containers/{address.container}/logs",
-                params={
-                    "stdout": "true",
-                    "stderr": "true",
-                    "timestamps": "true",
-                    "tail": str(tail),
-                },
-                maximum_bytes=_MAX_LOG_BYTES,
-                truncate=True,
-            )
-        finally:
-            client.close()
+        payload, truncated = _read_response(
+            self._client(),
+            f"containers/{address.container}/logs",
+            params={
+                "stdout": "true",
+                "stderr": "true",
+                "timestamps": "true",
+                "tail": str(tail),
+            },
+            maximum_bytes=_MAX_LOG_BYTES,
+            truncate=True,
+        )
         entries, frame_truncated = _decode_logs(payload, multiplexed=not tty)
         return DriverLogResult(
             entries=tuple(entries[-tail:]),
             truncated=truncated or frame_truncated or len(entries) > tail,
         )
+
+    def stats(self, uri: str) -> DriverContainerStats:
+        """One point-in-time stats sample (`one-shot=true`, so the daemon
+        answers immediately instead of blocking a second to pre-compute a
+        rate — rates are the caller's job, from two samples).
+
+        Not part of `EnvironmentDriver`: the agent-facing protocol stays the
+        three-operation ADR-017 surface. Stats exist for the driver runner's
+        metrics collection, a trusted process on the same host."""
+        try:
+            address = parse_docker_uri(uri)
+        except DockerUriInvalid as error:
+            raise DriverOperationInvalid(str(error)) from error
+        if address.target_reference != self._reference:
+            raise DriverOperationInvalid(
+                "address does not belong to this driver's target"
+            )
+        if address.container is None:
+            raise DriverOperationInvalid("Docker stats require a container address")
+        inspect = self._get_json(f"containers/{address.container}/json")
+        if not isinstance(inspect, dict):
+            raise DriverProtocolError("Docker inspect response must be an object")
+        _assert_matches(address, _container_from_inspect(inspect))
+        document = self._get_json(
+            f"containers/{address.container}/stats",
+            params={"stream": "false", "one-shot": "true"},
+        )
+        if not isinstance(document, dict):
+            raise DriverProtocolError("Docker stats response must be an object")
+        return _stats_from_document(uri, document)
 
     def _list_containers(self) -> list[_Container]:
         document = self._get_json("containers/json", params={"all": "true"})
@@ -196,29 +245,39 @@ class DockerDriver:
         return containers
 
     def _get_json(self, path: str, *, params: dict[str, str] | None = None) -> Any:
-        client = self._client()
-        try:
-            payload, _ = _read_response(
-                client, path, params=params, maximum_bytes=_MAX_INVENTORY_BYTES, truncate=False
-            )
-        finally:
-            client.close()
+        payload, _ = _read_response(
+            self._client(),
+            path,
+            params=params,
+            maximum_bytes=_MAX_INVENTORY_BYTES,
+            truncate=False,
+        )
         try:
             return httpx.Response(200, content=payload).json()
         except ValueError as error:
             raise DriverProtocolError("Docker returned malformed JSON") from error
 
     def _client(self) -> httpx.Client:
-        if self._client_factory is not None:
-            return self._client_factory()
-        if self._endpoint.startswith("unix://"):
-            socket_path = self._endpoint.removeprefix("unix://")
-            return httpx.Client(
-                base_url="http://docker/",
-                transport=httpx.HTTPTransport(uds=socket_path),
-                timeout=self._timeout,
-            )
-        return httpx.Client(base_url=f"{self._endpoint.rstrip('/')}/", timeout=self._timeout)
+        # One client for the driver's lifetime, opened lazily. The stated
+        # deployment model is a long-running poller; a client per request
+        # re-handshakes the socket/TLS on every call for no benefit.
+        # httpx.Client is safe for concurrent requests, and `close()` resets
+        # cleanly if a caller wants a fresh connection pool.
+        if self._client_instance is None:
+            if self._client_factory is not None:
+                self._client_instance = self._client_factory()
+            elif self._endpoint.startswith("unix://"):
+                socket_path = self._endpoint.removeprefix("unix://")
+                self._client_instance = httpx.Client(
+                    base_url="http://docker/",
+                    transport=httpx.HTTPTransport(uds=socket_path),
+                    timeout=self._timeout,
+                )
+            else:
+                self._client_instance = httpx.Client(
+                    base_url=f"{self._endpoint.rstrip('/')}/", timeout=self._timeout
+                )
+        return self._client_instance
 
     def _container_resource(self, container: _Container) -> DriverResource:
         return DriverResource(
@@ -285,7 +344,10 @@ def _read_response(
             if response.status_code in {401, 403}:
                 raise DriverUnavailable("target rejected the credential-free request")
             if response.status_code == 404:
-                raise DriverOperationInvalid("target resource was not found")
+                # DriverResourceNotFound subclasses DriverOperationInvalid,
+                # so callers written against the original mapping keep
+                # working while the runner can tell "vanished mid-poll" apart.
+                raise DriverResourceNotFound("target resource was not found")
             if response.status_code >= 400:
                 raise DriverUnavailable(
                     f"target request failed with HTTP {response.status_code}"
@@ -485,6 +547,81 @@ def _bounded_optional(value: Any, *, maximum: int, field: str) -> str | None:
         return None
     if not isinstance(value, str) or len(value) > maximum:
         raise DriverProtocolError(f"Docker container {field} is malformed")
+    return value
+
+
+def _lifecycle_timestamp(value: Any) -> str | None:
+    """Docker reports "never happened" as a zero-value timestamp
+    (0001-01-01T00:00:00Z), not null — normalize that to None so consumers
+    don't have to know the sentinel."""
+    timestamp = _bounded_optional(value, maximum=128, field="lifecycle timestamp")
+    if timestamp is None or timestamp.startswith("0001-01-01"):
+        return None
+    return timestamp
+
+
+def _stats_from_document(uri: str, document: dict[str, Any]) -> DriverContainerStats:
+    cpu = document.get("cpu_stats")
+    if not isinstance(cpu, dict):
+        cpu = {}
+    cpu_usage = cpu.get("cpu_usage")
+    if not isinstance(cpu_usage, dict):
+        cpu_usage = {}
+    memory = document.get("memory_stats")
+    if not isinstance(memory, dict):
+        memory = {}
+    networks = document.get("networks")
+    rx_bytes: int | None = None
+    tx_bytes: int | None = None
+    if isinstance(networks, dict):
+        rx_values = [_safe_counter(v.get("rx_bytes")) for v in networks.values() if isinstance(v, dict)]
+        tx_values = [_safe_counter(v.get("tx_bytes")) for v in networks.values() if isinstance(v, dict)]
+        if rx_values and all(v is not None for v in rx_values):
+            rx_bytes = sum(v for v in rx_values if v is not None)
+        if tx_values and all(v is not None for v in tx_values):
+            tx_bytes = sum(v for v in tx_values if v is not None)
+    blkio = document.get("blkio_stats")
+    block_read: int | None = None
+    block_write: int | None = None
+    if isinstance(blkio, dict) and isinstance(blkio.get("io_service_bytes_recursive"), list):
+        read_total = 0
+        write_total = 0
+        saw_read = False
+        saw_write = False
+        for entry in blkio["io_service_bytes_recursive"]:
+            if not isinstance(entry, dict):
+                continue
+            op = entry.get("op")
+            value = _safe_counter(entry.get("value"))
+            if not isinstance(op, str) or value is None:
+                continue
+            # cgroup v1 capitalises the op ("Read"), v2 does not ("read").
+            if op.lower() == "read":
+                read_total += value
+                saw_read = True
+            elif op.lower() == "write":
+                write_total += value
+                saw_write = True
+        block_read = read_total if saw_read else None
+        block_write = write_total if saw_write else None
+    return DriverContainerStats(
+        uri=uri,
+        read_at=_bounded_optional(document.get("read"), maximum=128, field="stats timestamp"),
+        cpu_total_ns=_safe_counter(cpu_usage.get("total_usage")),
+        cpu_system_ns=_safe_counter(cpu.get("system_cpu_usage")),
+        online_cpus=_safe_counter(cpu.get("online_cpus")),
+        memory_usage_bytes=_safe_counter(memory.get("usage")),
+        memory_limit_bytes=_safe_counter(memory.get("limit")),
+        network_rx_bytes=rx_bytes,
+        network_tx_bytes=tx_bytes,
+        block_read_bytes=block_read,
+        block_write_bytes=block_write,
+    )
+
+
+def _safe_counter(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
     return value
 
 

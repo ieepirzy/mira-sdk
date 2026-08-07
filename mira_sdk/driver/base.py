@@ -17,7 +17,7 @@ and receives one as an argument per call.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 RESOURCE_TYPES = ("project", "service", "container")
@@ -43,6 +43,38 @@ class DriverResourceDetails:
     restart_count: int | None = None
     ports: tuple[str, ...] = ()
     networks: tuple[str, ...] = ()
+    # Lifecycle fields below are a superset of what mirarun's report contract
+    # (ADR-022) accepts — its request model is extra="forbid", so sinks that
+    # feed mirarun must select fields explicitly rather than serialising this
+    # dataclass wholesale. They exist for the driver runner's death/OOM event
+    # detection, which needs to observe lifecycle transitions between polls.
+    exit_code: int | None = None
+    oom_killed: bool | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DriverContainerStats:
+    """One point-in-time stats sample for a container.
+
+    CPU fields are cumulative counters, not rates — a rate requires two
+    samples, and whose clock spans them is a caller decision (the runner
+    diffs successive poll cycles). Any field the daemon did not supply, or
+    supplied in a shape this SDK does not recognise, is None rather than a
+    guess."""
+
+    uri: str
+    read_at: str | None = None
+    cpu_total_ns: int | None = None
+    cpu_system_ns: int | None = None
+    online_cpus: int | None = None
+    memory_usage_bytes: int | None = None
+    memory_limit_bytes: int | None = None
+    network_rx_bytes: int | None = None
+    network_tx_bytes: int | None = None
+    block_read_bytes: int | None = None
+    block_write_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,10 +115,18 @@ class DriverOperationInvalid(DriverError):
     """A request is malformed or outside the bounded read surface."""
 
 
-class DriverResourceNotFound(DriverError):
-    """The addressed resource does not exist."""
+class DriverResourceNotFound(DriverOperationInvalid):
+    """The addressed resource does not exist.
+
+    Subclasses `DriverOperationInvalid` deliberately: mirarun's inspector
+    (ADR-017) buckets a missing resource as an invalid operation, and callers
+    written against that contract must keep working — this class only adds
+    precision for callers that care about the distinction (the runner uses it
+    to tell "container vanished mid-poll" from a genuinely malformed
+    request)."""
 
 
+@runtime_checkable
 class EnvironmentDriver(Protocol):
     """Bounded read-only contract a driver implements for one target.
 
