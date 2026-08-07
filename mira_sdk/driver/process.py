@@ -47,6 +47,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 import logging
+import math
 import os
 import signal
 import socket
@@ -183,8 +184,12 @@ def _positive_float(value: str | None, *, name: str) -> float:
         parsed = float(value or "")
     except ValueError as error:
         raise DriverConfigError(f"{_PREFIX}{name} must be a number") from error
-    if parsed <= 0:
-        raise DriverConfigError(f"{_PREFIX}{name} must be positive")
+    # isfinite, not just > 0: float() happily accepts "nan" and "inf", and
+    # NaN slips through every ordered comparison — a NaN interval turns the
+    # end-of-cycle wait into the tight loop this validation exists to
+    # prevent, while inf parks the reporter forever.
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise DriverConfigError(f"{_PREFIX}{name} must be a positive finite number")
     return parsed
 
 

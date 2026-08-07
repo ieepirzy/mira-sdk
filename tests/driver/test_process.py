@@ -108,3 +108,14 @@ def test_portainer_backend_parses_and_builds():
 def test_unknown_backend_is_rejected():
     with pytest.raises(DriverConfigError):
         DriverProcessConfig.from_environ({**_MINIMAL, "MIRA_DRIVER_BACKEND": "kubernetes"})
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_non_finite_intervals_are_rejected(value):
+    # float() accepts all three, and NaN slips through ordered comparisons —
+    # a NaN interval is the endpoint-hammering tight loop the floor exists
+    # to prevent (Codex review on PR #2).
+    with pytest.raises(DriverConfigError):
+        DriverProcessConfig.from_environ(
+            {**_MINIMAL, "MIRA_DRIVER_INTERVAL_SECONDS": value}
+        )

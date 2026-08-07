@@ -29,6 +29,7 @@ from mira_sdk.driver.base import (
     DriverContainerStats,
     DriverError,
     DriverResourceDetails,
+    DriverResourceNotFound,
     DriverResourceQuery,
     EnvironmentDriver,
 )
@@ -148,14 +149,22 @@ class DriverRunner:
         for resource in resources:
             try:
                 details = self._driver.describe(resource.uri)
-            except DriverError:
-                # Vanished between list and inspect, most likely. Skipping
-                # one container keeps the report truthful for the rest; the
-                # all-failed case is handled below because *that* is not a
-                # truthful report of anything.
-                logger.exception("describe failed for %s", resource.uri)
+            except DriverResourceNotFound:
+                # Vanished between list and inspect: confirmed absence, so
+                # omitting it from the report is truthful.
+                logger.info("container vanished mid-poll: %s", resource.uri)
                 failed += 1
                 continue
+            except DriverError:
+                # Any other failure is NOT evidence of absence — but both
+                # receivers treat absence as authoritative (mirarun's report
+                # cache replaces wholesale; admin's ingest deletes on
+                # absence), so publishing without this container would
+                # delete a possibly-live container from their inventories,
+                # and dropping its baseline would blind lifecycle detection
+                # when it reappears. Abort the whole cycle instead: nothing
+                # publishes, baselines stay, the next cycle retries.
+                raise
             stats = self._sample_stats(resource.uri)
             previous = self._baselines.get(resource.uri)
             cpu_percent = _cpu_percent(previous.stats if previous else None, stats)
@@ -170,15 +179,12 @@ class DriverRunner:
                 finished_at=details.finished_at,
                 stats=stats,
             )
-        if resources and not observations:
-            # Every describe failed while the list call succeeded: the cycle
-            # is degraded, and publishing an empty inventory would be an
-            # authoritative "this host runs nothing" — which both mirarun's
-            # report cache and admin's delete-on-absence ingest would act on.
-            raise DriverError("every container describe failed; refusing to publish")
         if failed:
+            # Only confirmed-vanished containers reach here (anything else
+            # aborted the cycle above) — an empty inventory after N
+            # not-founds is genuinely "they're all gone", not degradation.
             logger.warning(
-                "%d of %d containers skipped this cycle for %s",
+                "%d of %d containers vanished mid-poll for %s",
                 failed,
                 len(resources),
                 self._reference,

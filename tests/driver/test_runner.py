@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from mira_sdk.driver.base import (
+    DriverUnavailable,
     DriverContainerStats,
     DriverError,
     DriverLogEntry,
@@ -209,10 +210,12 @@ def test_one_failing_sink_does_not_starve_the_other():
     assert len(healthy.snapshots) == 1
 
 
-def test_partial_describe_failure_publishes_the_rest():
+def test_confirmed_vanished_container_is_omitted_and_the_rest_publish():
     driver = FakeDriver()
     driver.containers[API_URI] = _details(API_URI, "muutto365-api-1")
     driver.containers[WORKER_URI] = _details(WORKER_URI, "muutto365-worker-1")
+    # A 404 between list and inspect is confirmed absence — omitting the
+    # container is truthful, so the rest of the report still goes out.
     driver.describe_failures[WORKER_URI] = DriverResourceNotFound("vanished mid-poll")
     sink = RecordingSink()
     _runner(driver, [sink]).run_once()
@@ -220,17 +223,50 @@ def test_partial_describe_failure_publishes_the_rest():
     assert uris == [API_URI]
 
 
-def test_every_describe_failing_refuses_to_publish():
+def test_transient_describe_failure_aborts_the_cycle_and_keeps_baselines():
+    # A DriverUnavailable is NOT evidence of absence, and both receivers
+    # treat absence as authoritative (mirarun replaces wholesale, admin
+    # deletes on absence) — publishing without the container would delete
+    # a possibly-live one. Nothing may publish, and the baseline must
+    # survive so lifecycle detection still works when the target recovers
+    # (Codex review on PR #2).
+    driver = FakeDriver()
+    driver.containers[API_URI] = _details(API_URI, "muutto365-api-1")
+    driver.containers[WORKER_URI] = _details(WORKER_URI, "muutto365-worker-1")
+    sink = RecordingSink()
+    runner = _runner(driver, [sink])
+    runner.run_once()  # healthy baseline cycle
+    assert len(sink.snapshots) == 1
+
+    driver.describe_failures[WORKER_URI] = DriverUnavailable("daemon hiccup")
+    with pytest.raises(DriverUnavailable):
+        runner.run_once()
+    assert len(sink.snapshots) == 1  # the degraded cycle published nothing
+
+    # Recovery: the worker dies for real. Its baseline survived the aborted
+    # cycle, so the death is still detected as a transition.
+    del driver.describe_failures[WORKER_URI]
+    driver.containers[WORKER_URI] = _details(
+        WORKER_URI,
+        "muutto365-worker-1",
+        state="exited",
+        finished_at="2026-08-07T12:05:00Z",
+        exit_code=1,
+    )
+    snapshot = runner.run_once()
+    assert [event.kind for event in snapshot.events] == ["container.exited"]
+
+
+def test_all_containers_vanishing_publishes_an_empty_truthful_inventory():
     driver = FakeDriver()
     driver.containers[API_URI] = _details(API_URI, "muutto365-api-1")
     driver.describe_failures[API_URI] = DriverResourceNotFound("gone")
     sink = RecordingSink()
-    runner = _runner(driver, [sink])
-    # An all-failed cycle publishing [] would read as an authoritative
-    # "this host runs nothing" — and admin's ingest deletes on absence.
-    with pytest.raises(DriverError):
-        runner.run_once()
-    assert sink.snapshots == []
+    _runner(driver, [sink]).run_once()
+    # Every skip was a confirmed 404: the host genuinely runs nothing that
+    # the list call saw, so the empty report is honest — unlike the
+    # transient-failure case above, which aborts instead.
+    assert sink.snapshots[0].containers == ()
 
 
 def test_genuinely_empty_inventory_is_published():
