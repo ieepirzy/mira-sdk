@@ -45,7 +45,7 @@ MIRA_DRIVER_ADMIN_COLLECTOR_TOKEN=... \
 mira-driver
 ```
 
-Configuration is env vars only, documented in `miraasdk/driver/process.py`. The reference deployment — a read-only Docker socket proxy plus the driver, as one Compose stack — lives in `deploy/`; the socket proxy is the single privileged component, and it doubles as MiraRun's direct-pull endpoint on WireGuard-reachable hosts. As a library, the same pieces compose explicitly: `DriverRunner(DockerDriver(...), [MirarunReportSink(...), AdminCollectorSink(...)], ...)`.
+Configuration is env vars only, documented in `miraasdk/driver/process.py`. The reference deployment — a read-only Docker socket proxy plus the driver, as one Compose stack — lives in `deploy/`; the production runbook for registering it as a Portainer git-backed stack is `docs/deployment.md`. As designed, the socket proxy is the single privileged component, and it doubles as MiraRun's direct-pull endpoint on WireGuard-reachable hosts. As a library, the same pieces compose explicitly: `DriverRunner(DockerDriver(...), [MirarunReportSink(...), AdminCollectorSink(...)], ...)`.
 
 ## Design
 
