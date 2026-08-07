@@ -1,8 +1,8 @@
 # mira-sdk
 
 [![CI](https://github.com/ieepirzy/mira-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/ieepirzy/mira-sdk/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/mira-sdk)](https://pypi.org/project/mira-sdk/)
-[![Python versions](https://img.shields.io/pypi/pyversions/mira-sdk)](https://pypi.org/project/mira-sdk/)
+[![PyPI version](https://img.shields.io/pypi/v/mira-sdk)](https://pypi.org/project/miraasdk/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mira-sdk)](https://pypi.org/project/miraasdk/)
 
 Client SDK for agent processes in the Mira ecosystem (MiraRun/MiraGen). Ships two deliberately separated faces (see `docs/architecture.md` for why they must never share a process):
 
