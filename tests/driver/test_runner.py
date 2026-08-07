@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from mira_sdk.driver.base import (
+from miraasdk.driver.base import (
     DriverUnavailable,
     DriverContainerStats,
     DriverError,
@@ -14,8 +14,8 @@ from mira_sdk.driver.base import (
     DriverResourceDetails,
     DriverResourceNotFound,
 )
-from mira_sdk.driver.metrics import HostMetricsUnavailable, MetricSample
-from mira_sdk.driver.runner import DriverRunner
+from miraasdk.driver.metrics import HostMetricsUnavailable, MetricSample
+from miraasdk.driver.runner import DriverRunner
 
 API_URI = "env://vps1/docker/project/muutto365/service/api/container/muutto365-api-1"
 WORKER_URI = (

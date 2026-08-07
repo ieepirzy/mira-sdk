@@ -1,19 +1,19 @@
-# mira-sdk: two faces
+# miraasdk: two faces
 
 **Status:** design, partially implemented
 **Date:** 2026-08-05
 
 ## The split
 
-`mira-sdk` is two things that share a resource model but must never share a
+`miraasdk` is two things that share a resource model but must never share a
 process:
 
-1. **`mira_sdk.telemetry`** — embeds in *any* Mira-orchestrated service.
-   Emits OTLP spans (built, see `mira_sdk/telemetry.py`). It is passive:
+1. **`miraasdk.telemetry`** — embeds in *any* Mira-orchestrated service.
+   Emits OTLP spans (built, see `miraasdk/telemetry.py`). It is passive:
    the host process calls into it, it never calls back into the host, and
    it never blocks the host on a telemetry backend being unreachable.
 
-2. **`mira_sdk.driver`** — runs as its *own* process, deployed separately
+2. **`miraasdk.driver`** — runs as its *own* process, deployed separately
    from anything using `telemetry`. It discovers and reads infrastructure
    (Docker/Portainer today, Kubernetes later) and reports normalized
    results back to mirarun's central MCP. This is the "Active environment
@@ -39,7 +39,7 @@ infrastructure targets registered by an operator. Two things extend it:
 
 ### Driver-reported targets
 
-A `mira_sdk.driver` process discovers targets mirarun's own process can't
+A `miraasdk.driver` process discovers targets mirarun's own process can't
 reach directly (a Portainer host behind its own network boundary, or a
 Kubernetes cluster) and reports them to mirarun's central MCP, which
 projects them into the same `TargetEnvironment`/`env://` model ADR-016
@@ -51,7 +51,7 @@ to a driver process.
 
 ### Self-registered service targets
 
-A process embedding `mira_sdk.telemetry` should be listable too — not as
+A process embedding `miraasdk.telemetry` should be listable too — not as
 infrastructure, but as itself: "the checkout service, read-only, here's
 what's currently true about it." An agent that selects it gets the same
 bounded `resource.describe`/`logs.query` shape, scoped to whatever that
@@ -70,7 +70,7 @@ services and change them just because they happen to emit telemetry.
 > report credential; the driver POSTs its inventory to
 > `POST /api/target-environments/{id}/report` on its own schedule, and
 > mirarun answers agent queries from that cache. The SDK side of that loop
-> is `mira_sdk.driver.runner` + `MirarunReportSink` (below). Log tailing
+> is `miraasdk.driver.runner` + `MirarunReportSink` (below). Log tailing
 > for reported targets remains open (it needs a reverse channel), and
 > *self-registered service targets* remain open — the discussion below is
 > kept for that half.
@@ -98,36 +98,36 @@ question than ADR-021's credential mechanism was. Not resolved here.
 
 ## What's implemented vs. scaffolded
 
-- `mira_sdk.telemetry` — implemented, published.
-- `mira_sdk.driver.base` — normalized contracts (`DriverResource`,
+- `miraasdk.telemetry` — implemented, published.
+- `miraasdk.driver.base` — normalized contracts (`DriverResource`,
   `DriverTarget`, the `EnvironmentDriver` protocol), mirroring the shape
   of mirarun's `TargetResourceInspector` (ADR-017) so a driver's answers
   slot into the same model without translation at the mirarun end.
-- `mira_sdk.driver.docker` — implemented: Compose-label discovery,
+- `miraasdk.driver.docker` — implemented: Compose-label discovery,
   bounded list/inspect/logs, orphan handling — the same bounded read-only
   contract ADR-017 established, reimplemented here because a driver
   process needs it standalone (not a mirarun-internal call).
-- `mira_sdk.driver.runner` — implemented: the report loop (ADR-022's
+- `miraasdk.driver.runner` — implemented: the report loop (ADR-022's
   node-side half). Polls a driver on a schedule, detects container
   death/OOM/restart between cycles (with a bounded post-mortem log tail),
   and publishes to isolated sinks.
-- `mira_sdk.driver.sinks` — implemented: `MirarunReportSink` (ADR-022
+- `miraasdk.driver.sinks` — implemented: `MirarunReportSink` (ADR-022
   `/report` contract, for hosts mirarun cannot reach) and
   `AdminCollectorSink` (movingfirm-admin's collector contract).
-- `mira_sdk.driver.metrics` — implemented: host metrics from procfs with
+- `miraasdk.driver.metrics` — implemented: host metrics from procfs with
   OpenTelemetry semantic-convention names/units. The names are the
   vocabulary contract; the wire stays each sink's concern until a real
   OTLP metrics pipeline exists.
-- `mira_sdk.driver.process` — implemented: env-var configuration and the
+- `miraasdk.driver.process` — implemented: env-var configuration and the
   `mira-driver` console entrypoint; the only module in the SDK that reads
   the environment. `deploy/` carries the reference compose stack (read-only
   socket proxy + driver).
-- `mira_sdk.driver.portainer` — implemented: `DockerDriver` through a
+- `miraasdk.driver.portainer` — implemented: `DockerDriver` through a
   Portainer instance's Docker proxy (`/api/endpoints/{id}/docker/*`,
   `X-API-Key`). A thin subclass on purpose — the proxy serves the daemon's
   own responses, so parsing, caps, and Compose-label identity are
   inherited, not duplicated.
-- `mira_sdk.driver.kubernetes` — not implemented. Nothing in the Mira
+- `miraasdk.driver.kubernetes` — not implemented. Nothing in the Mira
   ecosystem implements Kubernetes discovery anywhere yet; scaffolding it
   blind without a cluster to validate against would just be guessing.
 - Self-registration for telemetry-embedding services — not implemented;

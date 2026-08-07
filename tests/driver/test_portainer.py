@@ -3,8 +3,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from mira_sdk.driver.base import DriverResourceQuery, DriverUnavailable, EnvironmentDriver
-from mira_sdk.driver.portainer import PortainerDriver
+from miraasdk.driver.base import DriverResourceQuery, DriverUnavailable, EnvironmentDriver
+from miraasdk.driver.portainer import PortainerDriver
 
 COMPOSE_PROJECT = "com.docker.compose.project"
 COMPOSE_SERVICE = "com.docker.compose.service"

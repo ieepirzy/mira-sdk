@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from mira_sdk.driver.base import (
+from miraasdk.driver.base import (
     DriverContainerStats,
     DriverLogEntry,
     DriverLogResult,
@@ -30,7 +30,7 @@ from mira_sdk.driver.base import (
     DriverResourceQuery,
     DriverUnavailable,
 )
-from mira_sdk.driver.uri import DockerUriInvalid, build_docker_uri, parse_docker_uri
+from miraasdk.driver.uri import DockerUriInvalid, build_docker_uri, parse_docker_uri
 
 _COMPOSE_PROJECT = "com.docker.compose.project"
 _COMPOSE_SERVICE = "com.docker.compose.service"

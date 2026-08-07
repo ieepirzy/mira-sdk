@@ -25,7 +25,7 @@ import threading
 import time
 from typing import Protocol
 
-from mira_sdk.driver.base import (
+from miraasdk.driver.base import (
     DriverContainerStats,
     DriverError,
     DriverResourceDetails,
@@ -33,7 +33,7 @@ from mira_sdk.driver.base import (
     DriverResourceQuery,
     EnvironmentDriver,
 )
-from mira_sdk.driver.metrics import (
+from miraasdk.driver.metrics import (
     HostMetricsCollector,
     HostMetricsUnavailable,
     MetricSample,

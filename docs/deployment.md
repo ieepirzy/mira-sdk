@@ -82,7 +82,7 @@ cloned checkout on first deploy; expect a couple of minutes.
 
 Optionally enable GitOps polling on the stack so a merge to `main`
 redeploys automatically; otherwise "Pull and redeploy" manually after
-merges that touch `mira_sdk/` or `deploy/`.
+merges that touch `miraasdk/` or `deploy/`.
 
 ## Verifying the deployment
 
@@ -117,17 +117,16 @@ merges that touch `mira_sdk/` or `deploy/`.
   Container-to-host traffic to a Docker-published port does not normally
   traverse UFW's default-deny input chain, but if a firewall change lands
   on the box, this is the first symptom to re-check.
-- **Stack deploy fails with a build error referencing `mira_sdk/`** — the
-  compose path was registered without the repo-root build context reaching
-  Portainer's clone (compose resolves `context: ..` relative to
-  `deploy/`), or an in-flight rename changed the package directory. The
-  fix is in the repo, not in Portainer settings: `deploy/Dockerfile` must
-  `COPY` whatever the package directory is actually called on the pinned
-  branch. (As of this writing the directory is still `mira_sdk/` — only the
-  PyPI distribution name changed on `main` — and the in-flight rename to
-  `miraasdk/`, PR #3, already updates `deploy/Dockerfile` in the same
-  commit; this failure mode applies only if a future rename ships without
-  its Dockerfile half.)
+- **Stack deploy fails with a build error referencing `miraasdk/` (or a
+  stale `mira_sdk/`)** — the compose path was registered without the
+  repo-root build context reaching Portainer's clone (compose resolves
+  `context: ..` relative to `deploy/`), or a future rename changes the
+  package directory again. The fix is in the repo, not in Portainer
+  settings: `deploy/Dockerfile` must `COPY` whatever the package directory
+  is actually called on the pinned branch. (The rename from `mira_sdk/` to
+  `miraasdk/` — PR #3 — updated `deploy/Dockerfile` in the same commit, so
+  this failure mode only recurs if a *future* rename ships without its
+  Dockerfile half.)
 
 ## What this deliberately does not do
 

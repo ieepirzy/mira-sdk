@@ -21,7 +21,7 @@ from collections.abc import Callable
 
 import httpx
 
-from mira_sdk.driver.docker import DockerDriver
+from miraasdk.driver.docker import DockerDriver
 
 
 class PortainerDriver(DockerDriver):

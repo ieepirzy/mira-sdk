@@ -10,7 +10,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 from opentelemetry.trace import StatusCode
 
-from mira_sdk import ExportStats, MiraTelemetry
+from miraasdk import ExportStats, MiraTelemetry
 
 
 def _telemetry(exporter: SpanExporter, **kwargs) -> MiraTelemetry:
