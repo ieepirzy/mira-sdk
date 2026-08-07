@@ -123,8 +123,11 @@ merges that touch `mira_sdk/` or `deploy/`.
   `deploy/`), or an in-flight rename changed the package directory. The
   fix is in the repo, not in Portainer settings: `deploy/Dockerfile` must
   `COPY` whatever the package directory is actually called on the pinned
-  branch (PR #3 renames `mira_sdk` → `miraasdk`; its merge must update
-  `deploy/Dockerfile` in the same commit).
+  branch. (As of this writing the directory is still `mira_sdk/` — only the
+  PyPI distribution name changed on `main` — and the in-flight rename to
+  `miraasdk/`, PR #3, already updates `deploy/Dockerfile` in the same
+  commit; this failure mode applies only if a future rename ships without
+  its Dockerfile half.)
 
 ## What this deliberately does not do
 
