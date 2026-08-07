@@ -122,6 +122,11 @@ question than ADR-021's credential mechanism was. Not resolved here.
   `mira-driver` console entrypoint; the only module in the SDK that reads
   the environment. `deploy/` carries the reference compose stack (read-only
   socket proxy + driver).
+- `mira_sdk.driver.portainer` — implemented: `DockerDriver` through a
+  Portainer instance's Docker proxy (`/api/endpoints/{id}/docker/*`,
+  `X-API-Key`). A thin subclass on purpose — the proxy serves the daemon's
+  own responses, so parsing, caps, and Compose-label identity are
+  inherited, not duplicated.
 - `mira_sdk.driver.kubernetes` — not implemented. Nothing in the Mira
   ecosystem implements Kubernetes discovery anywhere yet; scaffolding it
   blind without a cluster to validate against would just be guessing.

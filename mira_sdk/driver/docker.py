@@ -342,7 +342,11 @@ def _read_response(
     try:
         with client.stream("GET", path, params=params) as response:
             if response.status_code in {401, 403}:
-                raise DriverUnavailable("target rejected the credential-free request")
+                # Unavailable, not invalid: for the bare-socket driver there
+                # is no credential to fix, and for the Portainer subclass a
+                # rejected key is an operator problem either way — the
+                # caller's request was fine.
+                raise DriverUnavailable("target rejected the request as unauthorized")
             if response.status_code == 404:
                 # DriverResourceNotFound subclasses DriverOperationInvalid,
                 # so callers written against the original mapping keep

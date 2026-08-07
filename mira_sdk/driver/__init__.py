@@ -14,6 +14,7 @@ from .base import (
 )
 from .docker import DockerDriver
 from .metrics import HostMetricsCollector, HostMetricsUnavailable, MetricSample
+from .portainer import PortainerDriver
 from .process import DriverConfigError, DriverProcessConfig, build_runner
 from .runner import (
     ContainerObservation,
@@ -58,6 +59,7 @@ __all__ = [
     "HostMetricsUnavailable",
     "MetricSample",
     "MirarunReportSink",
+    "PortainerDriver",
     "SinkPublishError",
     "SnapshotSink",
     "build_docker_uri",

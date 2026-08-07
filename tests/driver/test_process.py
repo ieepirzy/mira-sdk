@@ -85,3 +85,26 @@ def test_blank_values_are_treated_as_unset():
 def test_build_runner_smoke():
     runner = build_runner(DriverProcessConfig.from_environ(_MINIMAL))
     assert isinstance(runner, DriverRunner)
+
+
+def test_portainer_backend_requires_its_triple():
+    with pytest.raises(DriverConfigError):
+        DriverProcessConfig.from_environ({**_MINIMAL, "MIRA_DRIVER_BACKEND": "portainer"})
+
+
+def test_portainer_backend_parses_and_builds():
+    config = DriverProcessConfig.from_environ({
+        **_MINIMAL,
+        "MIRA_DRIVER_BACKEND": "portainer",
+        "MIRA_DRIVER_PORTAINER_URL": "https://portainer.internal",
+        "MIRA_DRIVER_PORTAINER_ENDPOINT_ID": "2",
+        "MIRA_DRIVER_PORTAINER_API_KEY": "ptr_token",
+    })
+    assert config.backend == "portainer"
+    assert config.portainer_endpoint_id == 2
+    assert isinstance(build_runner(config), DriverRunner)
+
+
+def test_unknown_backend_is_rejected():
+    with pytest.raises(DriverConfigError):
+        DriverProcessConfig.from_environ({**_MINIMAL, "MIRA_DRIVER_BACKEND": "kubernetes"})

@@ -10,8 +10,15 @@ Config surface (all prefixed MIRA_DRIVER_):
 
   TARGET_REFERENCE   required; the reference mirarun's registry knows this
                      host by (also the default admin node_id)
+  BACKEND            default docker; "portainer" reads through a Portainer
+                     instance's Docker proxy instead of a socket/endpoint
   DOCKER_ENDPOINT    default unix:///var/run/docker.sock; an http(s):// URL
                      reaches a TCP endpoint such as a docker-socket-proxy
+                     (docker backend only)
+  PORTAINER_URL / PORTAINER_ENDPOINT_ID / PORTAINER_API_KEY
+                     required together for the portainer backend: the
+                     instance URL, the numeric environment id it manages,
+                     and an access token for a read-only Portainer user
   INTERVAL_SECONDS   default 60, minimum 5
   POSTMORTEM_TAIL    default 50, range 1-1000 (driver log-tail bounds)
   MIRARUN_REPORT_URL / MIRARUN_REPORT_TOKEN
@@ -46,8 +53,10 @@ import socket
 import sys
 import threading
 
+from mira_sdk.driver.base import EnvironmentDriver
 from mira_sdk.driver.docker import DockerDriver
 from mira_sdk.driver.metrics import HostMetricsCollector
+from mira_sdk.driver.portainer import PortainerDriver
 from mira_sdk.driver.runner import DriverRunner, SnapshotSink
 from mira_sdk.driver.sinks import AdminCollectorSink, MirarunReportSink
 from mira_sdk.driver.uri import valid_target_reference
@@ -64,7 +73,11 @@ class DriverConfigError(Exception):
 @dataclass(frozen=True, slots=True)
 class DriverProcessConfig:
     target_reference: str
+    backend: str
     docker_endpoint: str
+    portainer_url: str | None
+    portainer_endpoint_id: int | None
+    portainer_api_key: str | None
     interval_seconds: float
     postmortem_tail: int
     mirarun_report_url: str | None
@@ -119,9 +132,37 @@ class DriverProcessConfig:
         if host_metrics_raw not in {"true", "false"}:
             raise DriverConfigError(f"{_PREFIX}HOST_METRICS must be true or false")
 
+        backend = get("BACKEND", "docker")
+        if backend not in {"docker", "portainer"}:
+            raise DriverConfigError(f"{_PREFIX}BACKEND must be docker or portainer")
+        portainer_url = get("PORTAINER_URL")
+        portainer_endpoint_raw = get("PORTAINER_ENDPOINT_ID")
+        portainer_api_key = get("PORTAINER_API_KEY")
+        portainer_endpoint_id: int | None = None
+        if backend == "portainer":
+            if not (portainer_url and portainer_endpoint_raw and portainer_api_key):
+                raise DriverConfigError(
+                    f"the portainer backend requires {_PREFIX}PORTAINER_URL, "
+                    f"{_PREFIX}PORTAINER_ENDPOINT_ID and {_PREFIX}PORTAINER_API_KEY"
+                )
+            try:
+                portainer_endpoint_id = int(portainer_endpoint_raw)
+            except ValueError as error:
+                raise DriverConfigError(
+                    f"{_PREFIX}PORTAINER_ENDPOINT_ID must be an integer"
+                ) from error
+            if portainer_endpoint_id < 1:
+                raise DriverConfigError(
+                    f"{_PREFIX}PORTAINER_ENDPOINT_ID must be positive"
+                )
+
         return cls(
             target_reference=reference,
+            backend=backend,  # type: ignore[arg-type]
             docker_endpoint=get("DOCKER_ENDPOINT", "unix:///var/run/docker.sock"),  # type: ignore[arg-type]
+            portainer_url=portainer_url,
+            portainer_endpoint_id=portainer_endpoint_id,
+            portainer_api_key=portainer_api_key,
             interval_seconds=interval,
             postmortem_tail=tail,
             mirarun_report_url=mirarun_url,
@@ -182,7 +223,18 @@ def _parse_disk_paths(value: str) -> tuple[tuple[str, str], ...]:
 
 
 def build_runner(config: DriverProcessConfig) -> DriverRunner:
-    driver = DockerDriver(config.target_reference, endpoint=config.docker_endpoint)
+    driver: EnvironmentDriver
+    if config.backend == "portainer":
+        # from_environ guarantees these three together for this backend.
+        assert config.portainer_url and config.portainer_endpoint_id and config.portainer_api_key
+        driver = PortainerDriver(
+            config.target_reference,
+            portainer_url=config.portainer_url,
+            endpoint_id=config.portainer_endpoint_id,
+            api_key=config.portainer_api_key,
+        )
+    else:
+        driver = DockerDriver(config.target_reference, endpoint=config.docker_endpoint)
     sinks: list[SnapshotSink] = []
     if config.mirarun_report_url is not None and config.mirarun_report_token is not None:
         sinks.append(
