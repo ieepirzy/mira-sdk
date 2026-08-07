@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mira-sdk"
+name = "miraasdk"
 version = "0.2.0"
 description = "Client SDK for the Mira ecosystem: run-scoped OTLP telemetry (mira_sdk.telemetry) and a standalone environment driver toolkit (mira_sdk.driver) for Docker/Portainer/Kubernetes discovery, reporting into MiraRun's environment model."
 authors = [
