@@ -9,8 +9,10 @@ import pytest
 from mira_sdk.driver.base import (
     DriverOperationInvalid,
     DriverProtocolError,
+    DriverResourceNotFound,
     DriverResourceQuery,
     DriverUnavailable,
+    EnvironmentDriver,
 )
 from mira_sdk.driver.docker import DockerDriver
 
@@ -220,6 +222,18 @@ def test_maps_404_to_operation_invalid():
         driver.query(DriverResourceQuery(resource_type="container"))
 
 
+def test_404_is_also_resource_not_found():
+    # The refined class must remain catchable as DriverOperationInvalid
+    # (the test above) — that is the ADR-017 contract callers were written
+    # against; the subclass only adds precision.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    driver = _driver(handler)
+    with pytest.raises(DriverResourceNotFound):
+        driver.query(DriverResourceQuery(resource_type="container"))
+
+
 def test_maps_server_error_to_unavailable():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
@@ -278,3 +292,142 @@ def test_enforces_container_inventory_cap():
     driver = _driver(handler)
     with pytest.raises(DriverProtocolError):
         driver.query(DriverResourceQuery(resource_type="container"))
+
+
+_STATS = {
+    "read": "2026-08-07T10:00:00.000000000Z",
+    "cpu_stats": {
+        "cpu_usage": {"total_usage": 5_000_000_000},
+        "system_cpu_usage": 100_000_000_000,
+        "online_cpus": 2,
+    },
+    "memory_stats": {"usage": 104_857_600, "limit": 536_870_912},
+    "networks": {
+        "eth0": {"rx_bytes": 1000, "tx_bytes": 2000},
+        "eth1": {"rx_bytes": 500, "tx_bytes": 300},
+    },
+    "blkio_stats": {
+        "io_service_bytes_recursive": [
+            # cgroup v1 capitalises ops, v2 does not — both must count.
+            {"op": "Read", "value": 4096},
+            {"op": "read", "value": 1024},
+            {"op": "Write", "value": 8192},
+        ]
+    },
+}
+
+API_URI = "env://vps1/docker/project/muutto365/service/api/container/muutto365-api-1"
+
+
+def test_stats_one_shot_sample():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/containers/muutto365-api-1/json":
+            return httpx.Response(200, json=_INSPECT_API)
+        assert request.url.path == "/containers/muutto365-api-1/stats"
+        # one-shot: the daemon answers immediately instead of blocking a
+        # second to pre-compute a rate we would discard anyway.
+        assert request.url.params["stream"] == "false"
+        assert request.url.params["one-shot"] == "true"
+        return httpx.Response(200, json=_STATS)
+
+    driver = _driver(handler)
+    sample = driver.stats(API_URI)
+    assert sample.uri == API_URI
+    assert sample.read_at == "2026-08-07T10:00:00.000000000Z"
+    assert sample.cpu_total_ns == 5_000_000_000
+    assert sample.cpu_system_ns == 100_000_000_000
+    assert sample.online_cpus == 2
+    assert sample.memory_usage_bytes == 104_857_600
+    assert sample.memory_limit_bytes == 536_870_912
+    assert sample.network_rx_bytes == 1500
+    assert sample.network_tx_bytes == 2300
+    assert sample.block_read_bytes == 4096 + 1024
+    assert sample.block_write_bytes == 8192
+
+
+def test_stats_tolerates_missing_sections():
+    # A stopped container answers with empty/absent sections; every field
+    # must degrade to None, never to a guessed zero.
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/containers/muutto365-api-1/json":
+            return httpx.Response(200, json=_INSPECT_API)
+        return httpx.Response(200, json={"memory_stats": {}})
+
+    driver = _driver(handler)
+    sample = driver.stats(API_URI)
+    assert sample.cpu_total_ns is None
+    assert sample.memory_usage_bytes is None
+    assert sample.network_rx_bytes is None
+    assert sample.block_read_bytes is None
+
+
+def test_stats_requires_container_address():
+    driver = _driver(_list_handler)
+    with pytest.raises(DriverOperationInvalid):
+        driver.stats("env://vps1/docker/project/muutto365/service/api")
+
+
+def test_describe_reports_lifecycle_fields():
+    inspect = dict(_INSPECT_API)
+    inspect["State"] = {
+        "Status": "exited",
+        "ExitCode": 137,
+        "OOMKilled": True,
+        "StartedAt": "2026-08-07T09:00:00.000000000Z",
+        "FinishedAt": "2026-08-07T10:00:00.000000000Z",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=inspect)
+
+    driver = _driver(handler)
+    details = driver.describe(API_URI)
+    assert details.exit_code == 137
+    assert details.oom_killed is True
+    assert details.started_at == "2026-08-07T09:00:00.000000000Z"
+    assert details.finished_at == "2026-08-07T10:00:00.000000000Z"
+
+
+def test_describe_normalizes_dockers_zero_value_timestamps():
+    # Docker reports "never finished" as 0001-01-01T00:00:00Z, not null.
+    inspect = dict(_INSPECT_API)
+    inspect["State"] = {
+        "Status": "running",
+        "StartedAt": "2026-08-07T09:00:00.000000000Z",
+        "FinishedAt": "0001-01-01T00:00:00Z",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=inspect)
+
+    driver = _driver(handler)
+    details = driver.describe(API_URI)
+    assert details.finished_at is None
+    assert details.started_at == "2026-08-07T09:00:00.000000000Z"
+
+
+def test_client_is_reused_across_requests():
+    # The deployment model is a long-running poller; a fresh client (and
+    # handshake) per request was flagged as churn. One factory call, many
+    # requests.
+    calls = 0
+    transport = httpx.MockTransport(_list_handler)
+
+    def factory() -> httpx.Client:
+        nonlocal calls
+        calls += 1
+        return httpx.Client(base_url="http://docker/", transport=transport)
+
+    driver = DockerDriver("vps1", client_factory=factory)
+    driver.query(DriverResourceQuery(resource_type="container"))
+    driver.query(DriverResourceQuery(resource_type="container"))
+    assert calls == 1
+    driver.close()
+    driver.query(DriverResourceQuery(resource_type="container"))
+    assert calls == 2  # close() resets; next use reopens
+
+
+def test_docker_driver_satisfies_environment_driver_protocol():
+    # Guards the structural contract: DockerDriver never inherits from
+    # EnvironmentDriver, so nothing else would catch a drifted signature.
+    assert isinstance(DockerDriver("vps1"), EnvironmentDriver)

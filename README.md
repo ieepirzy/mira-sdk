@@ -4,12 +4,16 @@
 [![PyPI version](https://img.shields.io/pypi/v/mira-sdk)](https://pypi.org/project/mira-sdk/)
 [![Python versions](https://img.shields.io/pypi/pyversions/mira-sdk)](https://pypi.org/project/mira-sdk/)
 
-Client SDK for agent processes in the Mira ecosystem (MiraRun/MiraGen). Currently ships one thing: run-scoped OTLP telemetry export, correlated with the run/routine/agent identity a Mira-orchestrated process already has.
+Client SDK for agent processes in the Mira ecosystem (MiraRun/MiraGen). Ships two deliberately separated faces (see `docs/architecture.md` for why they must never share a process):
+
+- **`mira_sdk.telemetry`** — run-scoped OTLP telemetry export, correlated with the run/routine/agent identity a Mira-orchestrated process already has. For embedding in any ordinary service.
+- **`mira_sdk.driver`** — a standalone, privileged, read-only infrastructure observer: bounded Docker discovery (list/inspect/logs/stats), host metrics with OpenTelemetry semantic-convention names, poll-based container death/OOM detection with post-mortem log tails, and a report loop (`mira-driver`) that publishes to MiraRun's reported-target endpoint (ADR-022) and/or movingfirm-admin's infra collector.
 
 ## Install
 
 ```bash
-pip install mira-sdk
+pip install mira-sdk            # telemetry only
+pip install 'mira-sdk[driver]'  # + the driver toolkit (httpx)
 ```
 
 ## Quickstart
@@ -31,6 +35,17 @@ with telemetry.span("resource.query", **{"mira.resource.uri": target_uri}):
 
 telemetry.shutdown()  # once, at process exit
 ```
+
+## The driver as a process
+
+```bash
+MIRA_DRIVER_TARGET_REFERENCE=vps1 \
+MIRA_DRIVER_ADMIN_COLLECTOR_URL=http://10.8.0.4:6767/api/ops/infra/collector \
+MIRA_DRIVER_ADMIN_COLLECTOR_TOKEN=... \
+mira-driver
+```
+
+Configuration is env vars only, documented in `mira_sdk/driver/process.py`. The reference deployment — a read-only Docker socket proxy plus the driver, as one Compose stack — lives in `deploy/`; the socket proxy is the single privileged component, and it doubles as MiraRun's direct-pull endpoint on WireGuard-reachable hosts. As a library, the same pieces compose explicitly: `DriverRunner(DockerDriver(...), [MirarunReportSink(...), AdminCollectorSink(...)], ...)`.
 
 ## Design
 

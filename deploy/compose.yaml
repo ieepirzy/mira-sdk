@@ -1,0 +1,69 @@
+# mira-driver host stack: one read-only socket proxy + the driver process.
+#
+# Registered as its own Portainer stack (one repo per stack — the same
+# GitOps rule that split movingfirm-admin out of the backend stack in
+# 2026-03). The socket proxy is the single privileged component on the
+# host: both the local driver and mirarun's WireGuard pull path consume the
+# Docker API exclusively through it, and it only permits the read-only
+# container endpoints (list / inspect / logs / stats). The raw socket is
+# never exposed on any network.
+#
+# Every environment variable the driver reads is declared explicitly below.
+# Compose only passes through declared variables — an undeclared one set in
+# Portainer's UI or .env silently never reaches the container (the exact
+# failure movingfirm-admin hit with PLAUSIBLE_* in issue #57).
+
+name: mira-driver
+
+services:
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    restart: unless-stopped
+    environment:
+      # Grants GET /containers/* only: list, inspect, logs, stats. POST=0
+      # keeps every mutating verb denied even within granted sections.
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - internal
+    ports:
+      # Bind ONLY to the WireGuard interface address — this is mirarun's
+      # direct-pull endpoint and must never face the public interface.
+      # Example: MIRA_PROXY_WG_BIND=10.8.0.4
+      - "${MIRA_PROXY_WG_BIND:?set to this host's WireGuard address}:2375:2375"
+
+  driver:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - socket-proxy
+    environment:
+      MIRA_DRIVER_TARGET_REFERENCE: ${MIRA_DRIVER_TARGET_REFERENCE:?the reference mirarun registers this host under}
+      MIRA_DRIVER_DOCKER_ENDPOINT: http://socket-proxy:2375
+      MIRA_DRIVER_INTERVAL_SECONDS: ${MIRA_DRIVER_INTERVAL_SECONDS:-60}
+      MIRA_DRIVER_ADMIN_COLLECTOR_URL: ${MIRA_DRIVER_ADMIN_COLLECTOR_URL:-}
+      MIRA_DRIVER_ADMIN_COLLECTOR_TOKEN: ${MIRA_DRIVER_ADMIN_COLLECTOR_TOKEN:-}
+      # Only used for hosts mirarun cannot reach (reachability "reported");
+      # on a WireGuard-reachable host leave these unset — mirarun pulls
+      # through the socket proxy instead.
+      MIRA_DRIVER_MIRARUN_REPORT_URL: ${MIRA_DRIVER_MIRARUN_REPORT_URL:-}
+      MIRA_DRIVER_MIRARUN_REPORT_TOKEN: ${MIRA_DRIVER_MIRARUN_REPORT_TOKEN:-}
+      MIRA_DRIVER_NODE_ENV: ${MIRA_DRIVER_NODE_ENV:-prod}
+      MIRA_DRIVER_PROC_PATH: /host/proc
+      # statvfs probes: the driver reports "/" using a single bind-mounted
+      # file from the host root filesystem. It deliberately does NOT get a
+      # mount of the host's / — a filesystem-usage probe needs statvfs on
+      # one path, not read access to every file on the machine.
+      MIRA_DRIVER_DISK_PATHS: /=/host/probes/rootfs
+    volumes:
+      - /proc:/host/proc:ro
+      - /etc/hostname:/host/probes/rootfs:ro
+    networks:
+      - internal
+
+networks:
+  internal: {}

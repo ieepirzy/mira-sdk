@@ -126,5 +126,12 @@ def parse_docker_uri(value: str) -> DockerAddress:
     return address
 
 
+def valid_target_reference(value: str) -> bool:
+    """Whether a string is usable as an `env://` target reference. Public so
+    process configuration can validate a reference without building and
+    parsing a throwaway URI."""
+    return _valid_reference(value)
+
+
 def _valid_reference(value: str) -> bool:
     return len(value) <= 63 and _REFERENCE.fullmatch(value) is not None
