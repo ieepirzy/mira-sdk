@@ -3,7 +3,7 @@
 Mirrors the shape of mirarun's `TargetResourceInspector` (ADR-017) so a
 driver's answers slot into mirarun's resource model without translation at
 the mirarun end. This package owns its own types rather than importing
-mirarun's — mira-sdk is a separate public package and must not depend on
+mirarun's — miraasdk is a separate public package and must not depend on
 mirarun's internals; the two are kept in sync by matching contract, not by
 sharing code.
 

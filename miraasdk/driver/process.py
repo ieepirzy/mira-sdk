@@ -1,6 +1,6 @@
 """The driver as a process: env-var configuration and the console entrypoint.
 
-This module is deliberately the only place in mira-sdk that reads the
+This module is deliberately the only place in miraasdk that reads the
 environment. Every class in the SDK stays constructor-configured — an
 embedding application decides its own configuration story — but a *process*
 has to get configuration from somewhere, and for a container under Compose
@@ -54,13 +54,13 @@ import socket
 import sys
 import threading
 
-from mira_sdk.driver.base import EnvironmentDriver
-from mira_sdk.driver.docker import DockerDriver
-from mira_sdk.driver.metrics import HostMetricsCollector
-from mira_sdk.driver.portainer import PortainerDriver
-from mira_sdk.driver.runner import DriverRunner, SnapshotSink
-from mira_sdk.driver.sinks import AdminCollectorSink, MirarunReportSink
-from mira_sdk.driver.uri import valid_target_reference
+from miraasdk.driver.base import EnvironmentDriver
+from miraasdk.driver.docker import DockerDriver
+from miraasdk.driver.metrics import HostMetricsCollector
+from miraasdk.driver.portainer import PortainerDriver
+from miraasdk.driver.runner import DriverRunner, SnapshotSink
+from miraasdk.driver.sinks import AdminCollectorSink, MirarunReportSink
+from miraasdk.driver.uri import valid_target_reference
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from mira_sdk.driver.uri import DockerUriInvalid, build_docker_uri, parse_docker_uri
+from miraasdk.driver.uri import DockerUriInvalid, build_docker_uri, parse_docker_uri
 
 
 def test_round_trips_project_only():

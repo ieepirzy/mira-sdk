@@ -29,7 +29,7 @@ from typing import Any
 
 import httpx
 
-from mira_sdk.driver.runner import DriverSnapshot
+from miraasdk.driver.runner import DriverSnapshot
 
 # Mirror of mirarun's server-side caps (domain/target_reports.py). Enforced
 # client-side so an oversized inventory fails as *our* error with a clear

@@ -6,7 +6,7 @@ import struct
 import httpx
 import pytest
 
-from mira_sdk.driver.base import (
+from miraasdk.driver.base import (
     DriverOperationInvalid,
     DriverProtocolError,
     DriverResourceNotFound,
@@ -14,7 +14,7 @@ from mira_sdk.driver.base import (
     DriverUnavailable,
     EnvironmentDriver,
 )
-from mira_sdk.driver.docker import DockerDriver
+from miraasdk.driver.docker import DockerDriver
 
 COMPOSE_PROJECT = "com.docker.compose.project"
 COMPOSE_SERVICE = "com.docker.compose.service"

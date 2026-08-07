@@ -1,25 +1,25 @@
-# mira-sdk
+# miraasdk
 
 [![CI](https://github.com/ieepirzy/mira-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/ieepirzy/mira-sdk/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/mira-sdk)](https://pypi.org/project/miraasdk/)
-[![Python versions](https://img.shields.io/pypi/pyversions/mira-sdk)](https://pypi.org/project/miraasdk/)
+[![PyPI version](https://img.shields.io/pypi/v/miraasdk)](https://pypi.org/project/miraasdk/)
+[![Python versions](https://img.shields.io/pypi/pyversions/miraasdk)](https://pypi.org/project/miraasdk/)
 
 Client SDK for agent processes in the Mira ecosystem (MiraRun/MiraGen). Ships two deliberately separated faces (see `docs/architecture.md` for why they must never share a process):
 
-- **`mira_sdk.telemetry`** — run-scoped OTLP telemetry export, correlated with the run/routine/agent identity a Mira-orchestrated process already has. For embedding in any ordinary service.
-- **`mira_sdk.driver`** — a standalone, privileged, read-only infrastructure observer: bounded Docker discovery (list/inspect/logs/stats), host metrics with OpenTelemetry semantic-convention names, poll-based container death/OOM detection with post-mortem log tails, and a report loop (`mira-driver`) that publishes to MiraRun's reported-target endpoint (ADR-022) and/or movingfirm-admin's infra collector.
+- **`miraasdk.telemetry`** — run-scoped OTLP telemetry export, correlated with the run/routine/agent identity a Mira-orchestrated process already has. For embedding in any ordinary service.
+- **`miraasdk.driver`** — a standalone, privileged, read-only infrastructure observer: bounded Docker discovery (list/inspect/logs/stats), host metrics with OpenTelemetry semantic-convention names, poll-based container death/OOM detection with post-mortem log tails, and a report loop (`mira-driver`) that publishes to MiraRun's reported-target endpoint (ADR-022) and/or movingfirm-admin's infra collector.
 
 ## Install
 
 ```bash
-pip install mira-sdk            # telemetry only
-pip install 'mira-sdk[driver]'  # + the driver toolkit (httpx)
+pip install miraasdk            # telemetry only
+pip install 'miraasdk[driver]'  # + the driver toolkit (httpx)
 ```
 
 ## Quickstart
 
 ```python
-from mira_sdk import MiraTelemetry
+from miraasdk import MiraTelemetry
 
 telemetry = MiraTelemetry(
     endpoint="https://mira.example/otlp/v1/traces",
@@ -45,7 +45,7 @@ MIRA_DRIVER_ADMIN_COLLECTOR_TOKEN=... \
 mira-driver
 ```
 
-Configuration is env vars only, documented in `mira_sdk/driver/process.py`. The reference deployment — a read-only Docker socket proxy plus the driver, as one Compose stack — lives in `deploy/`; the socket proxy is the single privileged component, and it doubles as MiraRun's direct-pull endpoint on WireGuard-reachable hosts. As a library, the same pieces compose explicitly: `DriverRunner(DockerDriver(...), [MirarunReportSink(...), AdminCollectorSink(...)], ...)`.
+Configuration is env vars only, documented in `miraasdk/driver/process.py`. The reference deployment — a read-only Docker socket proxy plus the driver, as one Compose stack — lives in `deploy/`; the socket proxy is the single privileged component, and it doubles as MiraRun's direct-pull endpoint on WireGuard-reachable hosts. As a library, the same pieces compose explicitly: `DriverRunner(DockerDriver(...), [MirarunReportSink(...), AdminCollectorSink(...)], ...)`.
 
 ## Design
 

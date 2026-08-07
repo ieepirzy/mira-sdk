@@ -5,7 +5,7 @@ import types
 
 import pytest
 
-from mira_sdk.driver.metrics import HostMetricsCollector, HostMetricsUnavailable
+from miraasdk.driver.metrics import HostMetricsCollector, HostMetricsUnavailable
 
 
 def _write_proc(

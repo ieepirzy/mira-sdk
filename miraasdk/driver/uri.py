@@ -8,7 +8,7 @@ validation, same `_orphans` handling) so a URI this module builds parses
 identically on the mirarun side.
 
 The Kubernetes-shaped hierarchy is intentionally not reimplemented here —
-nothing in mira-sdk answers for it yet (see `docs/architecture.md`).
+nothing in miraasdk answers for it yet (see `docs/architecture.md`).
 """
 
 from __future__ import annotations

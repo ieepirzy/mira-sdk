@@ -29,7 +29,7 @@ from opentelemetry.sdk.trace.export import (
     SpanExportResult,
 )
 
-logger = logging.getLogger("mira_sdk.telemetry")
+logger = logging.getLogger("miraasdk.telemetry")
 
 _DEFAULT_MAX_QUEUE_SIZE = 2048
 _DEFAULT_MAX_EXPORT_BATCH_SIZE = 512
@@ -131,7 +131,7 @@ class MiraTelemetry:
                 export_timeout_millis=export_timeout_millis,
             )
         )
-        self._tracer = self._provider.get_tracer("mira_sdk")
+        self._tracer = self._provider.get_tracer("miraasdk")
 
     @property
     def export_stats(self) -> ExportStats:
@@ -189,7 +189,7 @@ class _CountingExporter(SpanExporter):
             # Exporters are documented to return FAILURE rather than raise;
             # this is a defensive backstop against one that doesn't, not
             # the expected path.
-            logger.warning("mira_sdk telemetry export raised", exc_info=True)
+            logger.warning("miraasdk telemetry export raised", exc_info=True)
             result = SpanExportResult.FAILURE
         if result != SpanExportResult.SUCCESS:
             self._stats.failed_batches += 1

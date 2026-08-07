@@ -4,9 +4,9 @@
 # PyPI release.
 FROM python:3.12-slim
 
-WORKDIR /opt/mira-sdk
+WORKDIR /opt/miraasdk
 COPY pyproject.toml README.md LICENSE ./
-COPY mira_sdk ./mira_sdk
+COPY miraasdk ./miraasdk
 RUN pip install --no-cache-dir '.[driver]'
 
 # THIS IS CRITICAL: without it, buffered stdout can swallow the final log

@@ -5,14 +5,14 @@ import json
 import httpx
 import pytest
 
-from mira_sdk.driver.base import (
+from miraasdk.driver.base import (
     DriverContainerStats,
     DriverResource,
     DriverResourceDetails,
 )
-from mira_sdk.driver.metrics import MetricSample
-from mira_sdk.driver.runner import ContainerObservation, DriverEvent, DriverSnapshot
-from mira_sdk.driver.sinks import AdminCollectorSink, MirarunReportSink, SinkPublishError
+from miraasdk.driver.metrics import MetricSample
+from miraasdk.driver.runner import ContainerObservation, DriverEvent, DriverSnapshot
+from miraasdk.driver.sinks import AdminCollectorSink, MirarunReportSink, SinkPublishError
 
 API_URI = "env://vps1/docker/project/muutto365/service/api/container/muutto365-api-1"
 

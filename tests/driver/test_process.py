@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from mira_sdk.driver.process import (
+from miraasdk.driver.process import (
     DriverConfigError,
     DriverProcessConfig,
     build_runner,
 )
-from mira_sdk.driver.runner import DriverRunner
+from miraasdk.driver.runner import DriverRunner
 
 _MINIMAL = {
     "MIRA_DRIVER_TARGET_REFERENCE": "vps1",
