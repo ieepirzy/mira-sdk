@@ -1,0 +1,29 @@
+# deploy/compose.yaml builds with the repository root as the build context, so
+# this file governs what that upload contains. The Dockerfile COPYs only
+# pyproject.toml, README.md, LICENSE and miraasdk/ — everything below is context
+# the daemon never needs.
+
+.git
+.github
+.gitignore
+
+# Tests and docs are CI/developer inputs, never runtime inputs.
+tests
+docs
+
+# Python build/test/cache artifacts.
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+venv
+*.egg-info
+build
+dist
+
+# Editor/OS cruft.
+.vscode
+.idea
+.DS_Store
