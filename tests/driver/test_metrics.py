@@ -84,6 +84,25 @@ def test_cpu_count_sums_every_per_cpu_line_not_just_the_aggregate(tmp_path, monk
     assert samples[("system.cpu.logical.count", ())].value == 4.0
 
 
+def test_a_stat_file_past_the_read_cap_fails_loud_instead_of_undercounting(
+    tmp_path, monkeypatch
+):
+    # A high-core-count host's per-CPU section can exceed a naive read cap
+    # (Codex review, mira-sdk#6) — silently truncating it would report a
+    # wrong (too-low) CPU count instead of marking the metric unavailable.
+    _fake_statvfs(monkeypatch)
+    proc = _write_proc(tmp_path)
+    line = "cpu0 100 0 100 700 100 0 0 0 0 0\n"
+    # Comfortably exceeds HostMetricsCollector._READ_LIMIT_BYTES (1 MiB).
+    lines_needed = (1024 * 1024 // len(line)) + 10
+    (Path(proc) / "stat").write_text(
+        "cpu  100 0 100 700 100 0 0 0 0 0\n" + line * lines_needed
+    )
+    collector = HostMetricsCollector(proc_path=proc)
+    with pytest.raises(HostMetricsUnavailable):
+        collector.collect()
+
+
 def test_cpu_utilization_needs_two_samples(tmp_path, monkeypatch):
     _fake_statvfs(monkeypatch)
     proc = _write_proc(tmp_path)
