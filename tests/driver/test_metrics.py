@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import types
+from pathlib import Path
 
 import pytest
 
@@ -56,6 +57,31 @@ def test_load_average_and_uptime(tmp_path, monkeypatch):
     assert samples[("system.cpu.load_average.15m", ())].value == 0.30
     assert samples[("system.uptime", ())].value == 12345.67
     assert samples[("system.uptime", ())].unit == "s"
+
+
+def test_cpu_count_is_the_number_of_per_cpu_stat_lines(tmp_path, monkeypatch):
+    _fake_statvfs(monkeypatch)
+    # _write_proc's default stat file has one per-cpu line (cpu0).
+    collector = HostMetricsCollector(proc_path=_write_proc(tmp_path))
+    samples = _by_name(collector.collect())
+    assert samples[("system.cpu.logical.count", ())].value == 1.0
+    assert samples[("system.cpu.logical.count", ())].unit == "{cpu}"
+
+
+def test_cpu_count_sums_every_per_cpu_line_not_just_the_aggregate(tmp_path, monkeypatch):
+    _fake_statvfs(monkeypatch)
+    proc = _write_proc(tmp_path)
+    (Path(proc) / "stat").write_text(
+        "cpu  400 0 400 2800 400 0 0 0 0 0\n"
+        "cpu0 100 0 100 700 100 0 0 0 0 0\n"
+        "cpu1 100 0 100 700 100 0 0 0 0 0\n"
+        "cpu2 100 0 100 700 100 0 0 0 0 0\n"
+        "cpu3 100 0 100 700 100 0 0 0 0 0\n"
+        "intr 12345\n"
+    )
+    collector = HostMetricsCollector(proc_path=proc)
+    samples = _by_name(collector.collect())
+    assert samples[("system.cpu.logical.count", ())].value == 4.0
 
 
 def test_cpu_utilization_needs_two_samples(tmp_path, monkeypatch):

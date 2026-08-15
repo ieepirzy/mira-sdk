@@ -54,6 +54,7 @@ class HostMetricsCollector:
     def collect(self) -> tuple[MetricSample, ...]:
         samples: list[MetricSample] = []
         samples.extend(self._load_average())
+        samples.extend(self._cpu_count())
         samples.extend(self._cpu_utilization())
         samples.extend(self._memory())
         samples.extend(self._uptime())
@@ -82,6 +83,22 @@ class HostMetricsCollector:
         return [
             MetricSample(name=f"system.cpu.load_average.{window}", value=value, unit="1")
             for window, value in zip(("1m", "5m", "15m"), values)
+        ]
+
+    def _cpu_count(self) -> list[MetricSample]:
+        # /proc/stat's per-CPU lines (cpu0, cpu1, ...) — not os.cpu_count(),
+        # which would report this process's cgroup/affinity limit rather than
+        # the host's real logical CPU count the bind-mounted host procfs
+        # exists to read past.
+        count = sum(
+            1
+            for line in self._read("stat").splitlines()
+            if line.startswith("cpu") and line[3:4].isdigit()
+        )
+        if count == 0:
+            raise HostMetricsUnavailable("stat has no per-cpu lines")
+        return [
+            MetricSample(name="system.cpu.logical.count", value=float(count), unit="{cpu}")
         ]
 
     def _cpu_utilization(self) -> list[MetricSample]:
