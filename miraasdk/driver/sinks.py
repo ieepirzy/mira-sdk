@@ -241,4 +241,5 @@ def _collector_container(observation: Any) -> dict[str, Any]:
         "memory_limit_bytes": (
             observation.stats.memory_limit_bytes if observation.stats else None
         ),
+        "image_revision": observation.revision,
     }

@@ -30,6 +30,7 @@ def _observation(
     health: str | None = "healthy",
     stats: DriverContainerStats | None = None,
     cpu_percent: float | None = 12.5,
+    revision: str | None = None,
     ports: tuple[str, ...] = ("8080/tcp -> 0.0.0.0:8080",),
 ) -> ContainerObservation:
     return ContainerObservation(
@@ -53,6 +54,7 @@ def _observation(
         ),
         stats=stats,
         cpu_percent=cpu_percent,
+        revision=revision,
     )
 
 
@@ -149,6 +151,19 @@ def test_mirarun_sink_refuses_to_exceed_the_resource_cap():
     assert requests == []  # failed loud before sending, not after
 
 
+def test_admin_sink_reports_no_revision_as_null_not_omitted():
+    # An image built before the /GIT_REVISION convention existed must not
+    # look, on the wire, like a container that was never asked — admin's
+    # ingest treats a present-but-null field and an absent one the same way
+    # (dict.get), but the field itself must still exist for anything that
+    # later distinguishes "reported none" from "field never sent."
+    requests, transport = _capture(200, body={"status": "ok"})
+    _admin_sink(transport).publish(_snapshot(containers=(_observation(revision=None),)))
+    container = json.loads(requests[0].content)["containers"][0]
+    assert "image_revision" in container
+    assert container["image_revision"] is None
+
+
 def _admin_sink(transport: httpx.MockTransport) -> AdminCollectorSink:
     return AdminCollectorSink(
         collector_url="http://10.8.0.4:6767/api/ops/infra/collector",
@@ -170,6 +185,7 @@ def test_admin_sink_sends_resource_metrics_containers_and_events():
                     memory_usage_bytes=104_857_600,
                     memory_limit_bytes=536_870_912,
                 ),
+                revision="a" * 40,
             ),
         ),
         host_metrics=(
@@ -207,6 +223,7 @@ def test_admin_sink_sends_resource_metrics_containers_and_events():
     assert container["id"] == API_URI
     assert container["cpu_pct"] == 12.5
     assert container["memory_usage_bytes"] == 104_857_600
+    assert container["image_revision"] == "a" * 40
 
     event = payload["events"][0]
     assert event["kind"] == "container.oom_killed"
