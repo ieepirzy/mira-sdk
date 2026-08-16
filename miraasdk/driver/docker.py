@@ -247,11 +247,19 @@ class DockerDriver:
         the same reason `logs`/`stats` are: it names one specific thing to
         read, not an arbitrary command or path a caller supplies.
 
-        None, not an error, whenever the answer is merely absent: a 404 (no
-        such file — most of the fleet, until every image adopts the
-        convention) is exactly as unremarkable as a container that vanished
-        between list and this call. Callers already treat a per-container
-        None as "not reported," same as an unset metric.
+        None, not an error, whenever the answer is merely absent: a 404 from
+        the archive read specifically (no such file — most of the fleet,
+        until every image adopts the convention) is exactly as unremarkable
+        as a container that vanished between list and this call. Callers
+        already treat a per-container None as "not reported," same as an
+        unset metric.
+
+        Inspects first and checks identity the same way `stats` does —
+        without it, a container ID that no longer belongs to the addressed
+        project/service (recycled since the caller's last `query`, or a
+        caller-supplied URI that was simply wrong) would still have its
+        archive read and reported as if it were the addressed resource
+        (Codex review, mira-sdk#7).
 
         Not part of `EnvironmentDriver`, same as `stats` — probed via
         `getattr` by the driver runner rather than required."""
@@ -265,6 +273,10 @@ class DockerDriver:
             )
         if address.container is None:
             raise DriverOperationInvalid("Docker archive reads require a container address")
+        inspect = self._get_json(f"containers/{address.container}/json")
+        if not isinstance(inspect, dict):
+            raise DriverProtocolError("Docker inspect response must be an object")
+        _assert_matches(address, _container_from_inspect(inspect))
         try:
             payload, _ = _read_response(
                 self._client(),

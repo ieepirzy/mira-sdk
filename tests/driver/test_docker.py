@@ -385,6 +385,8 @@ _REAL_SHA = "a" * 40
 
 def test_revision_reads_the_git_revision_file():
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/containers/muutto365-api-1/json":
+            return httpx.Response(200, json=_INSPECT_API)
         assert request.url.path == "/containers/muutto365-api-1/archive"
         assert request.url.params["path"] == "/GIT_REVISION"
         return httpx.Response(
@@ -402,6 +404,8 @@ def test_revision_is_none_when_the_image_predates_the_convention():
     # container — the normal state for most of the fleet until every image
     # adopts the convention, not a fault.
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/containers/muutto365-api-1/json":
+            return httpx.Response(200, json=_INSPECT_API)
         return httpx.Response(404, json={"message": "no such file"})
 
     driver = _driver(handler)
@@ -410,6 +414,8 @@ def test_revision_is_none_when_the_image_predates_the_convention():
 
 def test_revision_is_none_for_content_that_does_not_look_like_a_commit():
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/containers/muutto365-api-1/json":
+            return httpx.Response(200, json=_INSPECT_API)
         return httpx.Response(200, content=_archive_tar("GIT_REVISION", b"not-a-sha\n"))
 
     driver = _driver(handler)
@@ -420,6 +426,26 @@ def test_revision_requires_container_address():
     driver = _driver(_list_handler)
     with pytest.raises(DriverOperationInvalid):
         driver.revision("env://vps1/docker/project/muutto365/service/api")
+
+
+def test_revision_rejects_a_container_that_does_not_match_the_addressed_identity():
+    # Without checking identity first, a recycled container ID (or a
+    # caller-supplied URI that was simply wrong) would have its archive
+    # read and reported as if it were the addressed resource (Codex
+    # review, mira-sdk#7) — same protection `stats` already has.
+    mismatched = dict(_INSPECT_API)
+    mismatched["Config"] = {
+        **_INSPECT_API["Config"],
+        "Labels": {COMPOSE_PROJECT: "other-project", COMPOSE_SERVICE: "api"},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/containers/muutto365-api-1/json"
+        return httpx.Response(200, json=mismatched)
+
+    driver = _driver(handler)
+    with pytest.raises(DriverOperationInvalid):
+        driver.revision(API_URI)
 
 
 def test_describe_reports_lifecycle_fields():
