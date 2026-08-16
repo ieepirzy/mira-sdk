@@ -54,22 +54,38 @@ class HostMetricsCollector:
     def collect(self) -> tuple[MetricSample, ...]:
         samples: list[MetricSample] = []
         samples.extend(self._load_average())
+        samples.extend(self._cpu_count())
         samples.extend(self._cpu_utilization())
         samples.extend(self._memory())
         samples.extend(self._uptime())
         samples.extend(self._filesystems())
         return tuple(samples)
 
+    # loadavg/meminfo/uptime are a handful of lines regardless of host size,
+    # but stat's per-CPU lines scale with core count — a real (if unusual)
+    # high-core-count host can legitimately approach or exceed a small cap.
+    # 1 MiB comfortably covers thousands of per-CPU lines while still
+    # bounding a misconfigured proc_path pointed at something huge.
+    _READ_LIMIT_BYTES = 1024 * 1024
+
     def _read(self, name: str) -> str:
         path = f"{self._proc}/{name}"
         try:
             with open(path, encoding="ascii", errors="replace") as handle:
-                # procfs files are small; 64 KiB is far beyond any real
-                # loadavg/stat/meminfo/uptime and bounds a misconfigured
-                # proc_path pointed at something that isn't procfs.
-                return handle.read(64 * 1024)
+                # Read one byte past the cap so a file that fills or exceeds
+                # it is detected as truncated and fails loud, rather than
+                # being silently processed as if it were complete — a
+                # truncated per-CPU count would undercount, not just be
+                # unavailable, which is worse than failing (Codex review,
+                # mira-sdk#6).
+                content = handle.read(self._READ_LIMIT_BYTES + 1)
         except OSError as error:
             raise HostMetricsUnavailable(f"cannot read {path}") from error
+        if len(content) > self._READ_LIMIT_BYTES:
+            raise HostMetricsUnavailable(
+                f"{path} exceeds the {self._READ_LIMIT_BYTES}-byte read cap"
+            )
+        return content
 
     def _load_average(self) -> list[MetricSample]:
         fields = self._read("loadavg").split()
@@ -82,6 +98,22 @@ class HostMetricsCollector:
         return [
             MetricSample(name=f"system.cpu.load_average.{window}", value=value, unit="1")
             for window, value in zip(("1m", "5m", "15m"), values)
+        ]
+
+    def _cpu_count(self) -> list[MetricSample]:
+        # /proc/stat's per-CPU lines (cpu0, cpu1, ...) — not os.cpu_count(),
+        # which would report this process's cgroup/affinity limit rather than
+        # the host's real logical CPU count the bind-mounted host procfs
+        # exists to read past.
+        count = sum(
+            1
+            for line in self._read("stat").splitlines()
+            if line.startswith("cpu") and line[3:4].isdigit()
+        )
+        if count == 0:
+            raise HostMetricsUnavailable("stat has no per-cpu lines")
+        return [
+            MetricSample(name="system.cpu.logical.count", value=float(count), unit="{cpu}")
         ]
 
     def _cpu_utilization(self) -> list[MetricSample]:

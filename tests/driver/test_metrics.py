@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import types
+from pathlib import Path
 
 import pytest
 
@@ -56,6 +57,50 @@ def test_load_average_and_uptime(tmp_path, monkeypatch):
     assert samples[("system.cpu.load_average.15m", ())].value == 0.30
     assert samples[("system.uptime", ())].value == 12345.67
     assert samples[("system.uptime", ())].unit == "s"
+
+
+def test_cpu_count_is_the_number_of_per_cpu_stat_lines(tmp_path, monkeypatch):
+    _fake_statvfs(monkeypatch)
+    # _write_proc's default stat file has one per-cpu line (cpu0).
+    collector = HostMetricsCollector(proc_path=_write_proc(tmp_path))
+    samples = _by_name(collector.collect())
+    assert samples[("system.cpu.logical.count", ())].value == 1.0
+    assert samples[("system.cpu.logical.count", ())].unit == "{cpu}"
+
+
+def test_cpu_count_sums_every_per_cpu_line_not_just_the_aggregate(tmp_path, monkeypatch):
+    _fake_statvfs(monkeypatch)
+    proc = _write_proc(tmp_path)
+    (Path(proc) / "stat").write_text(
+        "cpu  400 0 400 2800 400 0 0 0 0 0\n"
+        "cpu0 100 0 100 700 100 0 0 0 0 0\n"
+        "cpu1 100 0 100 700 100 0 0 0 0 0\n"
+        "cpu2 100 0 100 700 100 0 0 0 0 0\n"
+        "cpu3 100 0 100 700 100 0 0 0 0 0\n"
+        "intr 12345\n"
+    )
+    collector = HostMetricsCollector(proc_path=proc)
+    samples = _by_name(collector.collect())
+    assert samples[("system.cpu.logical.count", ())].value == 4.0
+
+
+def test_a_stat_file_past_the_read_cap_fails_loud_instead_of_undercounting(
+    tmp_path, monkeypatch
+):
+    # A high-core-count host's per-CPU section can exceed a naive read cap
+    # (Codex review, mira-sdk#6) — silently truncating it would report a
+    # wrong (too-low) CPU count instead of marking the metric unavailable.
+    _fake_statvfs(monkeypatch)
+    proc = _write_proc(tmp_path)
+    line = "cpu0 100 0 100 700 100 0 0 0 0 0\n"
+    # Comfortably exceeds HostMetricsCollector._READ_LIMIT_BYTES (1 MiB).
+    lines_needed = (1024 * 1024 // len(line)) + 10
+    (Path(proc) / "stat").write_text(
+        "cpu  100 0 100 700 100 0 0 0 0 0\n" + line * lines_needed
+    )
+    collector = HostMetricsCollector(proc_path=proc)
+    with pytest.raises(HostMetricsUnavailable):
+        collector.collect()
 
 
 def test_cpu_utilization_needs_two_samples(tmp_path, monkeypatch):
