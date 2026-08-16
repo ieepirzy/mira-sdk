@@ -60,6 +60,10 @@ class ContainerObservation:
     # docker-CLI convention: percent of one CPU, so a busy 4-core container
     # reads 400.0. None until two cycles have sampled the same container.
     cpu_percent: float | None = None
+    # The commit baked into the image at build time (Infrastructure "Deploy
+    # status" panel) — None for any image that predates the convention, not
+    # an error condition.
+    revision: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,10 +107,11 @@ class DriverRunner:
         self._interval = interval_seconds
         self._postmortem_tail = postmortem_tail
         self._now = now or (lambda: datetime.now(timezone.utc))
-        # `stats` is a DockerDriver extra, deliberately outside the
-        # EnvironmentDriver protocol — probe for it rather than requiring it
-        # so a stats-less driver still reports inventory and events.
+        # `stats`/`revision` are DockerDriver extras, deliberately outside the
+        # EnvironmentDriver protocol — probe for them rather than requiring
+        # them so a driver without either still reports inventory and events.
         self._stats_supported = callable(getattr(driver, "stats", None))
+        self._revision_supported = callable(getattr(driver, "revision", None))
         self._baselines: dict[str, _Baseline] = {}
 
     def run_once(self) -> DriverSnapshot:
@@ -166,10 +171,13 @@ class DriverRunner:
                 # publishes, baselines stay, the next cycle retries.
                 raise
             stats = self._sample_stats(resource.uri)
+            revision = self._sample_revision(resource.uri)
             previous = self._baselines.get(resource.uri)
             cpu_percent = _cpu_percent(previous.stats if previous else None, stats)
             observations.append(
-                ContainerObservation(details=details, stats=stats, cpu_percent=cpu_percent)
+                ContainerObservation(
+                    details=details, stats=stats, cpu_percent=cpu_percent, revision=revision
+                )
             )
             event = self._detect_event(previous, details, collected_at)
             if event is not None:
@@ -213,6 +221,15 @@ class DriverRunner:
             return self._driver.stats(uri)  # type: ignore[attr-defined]
         except DriverError:
             logger.exception("stats failed for %s", uri)
+            return None
+
+    def _sample_revision(self, uri: str) -> str | None:
+        if not self._revision_supported:
+            return None
+        try:
+            return self._driver.revision(uri)  # type: ignore[attr-defined]
+        except DriverError:
+            logger.exception("revision read failed for %s", uri)
             return None
 
     def _detect_event(

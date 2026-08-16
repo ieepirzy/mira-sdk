@@ -64,6 +64,7 @@ class FakeDriver:
     def __init__(self) -> None:
         self.containers: dict[str, DriverResourceDetails] = {}
         self.stats_by_uri: dict[str, DriverContainerStats] = {}
+        self.revision_by_uri: dict[str, str] = {}
         self.describe_failures: dict[str, Exception] = {}
         self.log_lines: dict[str, list[DriverLogEntry]] = {}
         self.log_requests: list[str] = []
@@ -84,6 +85,9 @@ class FakeDriver:
         if uri not in self.stats_by_uri:
             raise DriverResourceNotFound("no stats")
         return self.stats_by_uri[uri]
+
+    def revision(self, uri: str) -> str | None:
+        return self.revision_by_uri.get(uri)
 
 
 class RecordingSink:
@@ -143,6 +147,41 @@ def test_cpu_percent_rebaselines_when_counters_reset():
     driver.stats_by_uri[API_URI] = _stats(API_URI, total_ns=100, system_ns=1_000)
     snapshot = runner.run_once()
     assert snapshot.containers[0].cpu_percent is None
+
+
+def test_revision_is_forwarded_from_the_driver():
+    driver = FakeDriver()
+    driver.containers[API_URI] = _details(API_URI, "muutto365-api-1")
+    driver.revision_by_uri[API_URI] = "a" * 40
+    snapshot = _runner(driver, [RecordingSink()]).run_once()
+    assert snapshot.containers[0].revision == "a" * 40
+
+
+def test_revision_defaults_to_none_without_a_reported_value():
+    driver = FakeDriver()
+    driver.containers[API_URI] = _details(API_URI, "muutto365-api-1")
+    snapshot = _runner(driver, [RecordingSink()]).run_once()
+    assert snapshot.containers[0].revision is None
+
+
+def test_revision_is_none_for_a_driver_without_the_capability():
+    # `stats`/`revision` are both DockerDriver extras outside the
+    # EnvironmentDriver protocol — a driver missing either must still
+    # report inventory, just without that one field.
+    class BareDriver:
+        def query(self, query):
+            return [
+                DriverResource(uri=API_URI, resource_type="container", name="muutto365-api-1")
+            ]
+
+        def describe(self, uri: str) -> DriverResourceDetails:
+            return _details(API_URI, "muutto365-api-1")
+
+        def logs(self, uri: str, *, tail: int) -> DriverLogResult:
+            return DriverLogResult(entries=(), truncated=False)
+
+    snapshot = _runner(BareDriver(), [RecordingSink()]).run_once()
+    assert snapshot.containers[0].revision is None
 
 
 def test_death_between_cycles_emits_event_with_postmortem_tail():

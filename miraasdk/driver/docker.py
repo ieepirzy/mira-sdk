@@ -13,7 +13,9 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+import io
 import re
+import tarfile
 from typing import Any
 
 import httpx
@@ -41,6 +43,12 @@ _TIMESTAMP = re.compile(
 _MAX_INVENTORY_BYTES = 8 * 1024 * 1024
 _MAX_CONTAINERS = 10_000
 _MAX_LOG_BYTES = 256 * 1024
+# A tar of one ~41-byte file (a hex SHA plus newline) is a few hundred bytes
+# with header padding; this is generous headroom, not a real size a
+# well-formed response approaches.
+_MAX_REVISION_ARCHIVE_BYTES = 16 * 1024
+_GIT_REVISION_PATH = "/GIT_REVISION"
+_GIT_SHA = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +238,44 @@ class DockerDriver:
         if not isinstance(document, dict):
             raise DriverProtocolError("Docker stats response must be an object")
         return _stats_from_document(uri, document)
+
+    def revision(self, uri: str) -> str | None:
+        """The commit a Dockerfile's `revision` build stage baked into
+        `/GIT_REVISION` (Infrastructure "Deploy status" panel) — read via
+        Docker's per-path archive endpoint (what `docker cp` uses), which
+        this driver already treats as within the bounded read surface for
+        the same reason `logs`/`stats` are: it names one specific thing to
+        read, not an arbitrary command or path a caller supplies.
+
+        None, not an error, whenever the answer is merely absent: a 404 (no
+        such file — most of the fleet, until every image adopts the
+        convention) is exactly as unremarkable as a container that vanished
+        between list and this call. Callers already treat a per-container
+        None as "not reported," same as an unset metric.
+
+        Not part of `EnvironmentDriver`, same as `stats` — probed via
+        `getattr` by the driver runner rather than required."""
+        try:
+            address = parse_docker_uri(uri)
+        except DockerUriInvalid as error:
+            raise DriverOperationInvalid(str(error)) from error
+        if address.target_reference != self._reference:
+            raise DriverOperationInvalid(
+                "address does not belong to this driver's target"
+            )
+        if address.container is None:
+            raise DriverOperationInvalid("Docker archive reads require a container address")
+        try:
+            payload, _ = _read_response(
+                self._client(),
+                f"containers/{address.container}/archive",
+                params={"path": _GIT_REVISION_PATH},
+                maximum_bytes=_MAX_REVISION_ARCHIVE_BYTES,
+                truncate=False,
+            )
+        except DriverResourceNotFound:
+            return None
+        return _revision_from_archive(payload)
 
     def _list_containers(self) -> list[_Container]:
         document = self._get_json("containers/json", params={"all": "true"})
@@ -621,6 +667,25 @@ def _stats_from_document(uri: str, document: dict[str, Any]) -> DriverContainerS
         block_read_bytes=block_read,
         block_write_bytes=block_write,
     )
+
+
+def _revision_from_archive(payload: bytes) -> str | None:
+    """`/containers/{id}/archive` always answers with a tar, even for a
+    single-file path — this unwraps that one file and validates its
+    content looks like a git commit hash rather than trusting it blindly."""
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload)) as tar:
+            member = next((m for m in tar.getmembers() if m.isfile()), None)
+            if member is None:
+                return None
+            extracted = tar.extractfile(member)
+            if extracted is None:
+                return None
+            content = extracted.read(128)
+    except tarfile.TarError as error:
+        raise DriverProtocolError("Docker archive response is not a valid tar") from error
+    revision = content.decode("ascii", errors="replace").strip()
+    return revision if _GIT_SHA.fullmatch(revision) else None
 
 
 def _safe_counter(value: Any) -> int | None:

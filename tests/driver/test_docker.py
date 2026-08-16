@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import struct
+import tarfile
 
 import httpx
 import pytest
@@ -365,6 +367,59 @@ def test_stats_requires_container_address():
     driver = _driver(_list_handler)
     with pytest.raises(DriverOperationInvalid):
         driver.stats("env://vps1/docker/project/muutto365/service/api")
+
+
+def _archive_tar(name: str, content: bytes) -> bytes:
+    """`/containers/{id}/archive` always answers with a tar, even for a
+    single file — this builds one the way the real endpoint would."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        info = tarfile.TarInfo(name=name)
+        info.size = len(content)
+        tar.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
+
+
+_REAL_SHA = "a" * 40
+
+
+def test_revision_reads_the_git_revision_file():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/containers/muutto365-api-1/archive"
+        assert request.url.params["path"] == "/GIT_REVISION"
+        return httpx.Response(
+            200,
+            content=_archive_tar("GIT_REVISION", f"{_REAL_SHA}\n".encode()),
+            headers={"content-type": "application/x-tar"},
+        )
+
+    driver = _driver(handler)
+    assert driver.revision(API_URI) == _REAL_SHA
+
+
+def test_revision_is_none_when_the_image_predates_the_convention():
+    # Docker's archive endpoint 404s when the path doesn't exist inside the
+    # container — the normal state for most of the fleet until every image
+    # adopts the convention, not a fault.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"message": "no such file"})
+
+    driver = _driver(handler)
+    assert driver.revision(API_URI) is None
+
+
+def test_revision_is_none_for_content_that_does_not_look_like_a_commit():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=_archive_tar("GIT_REVISION", b"not-a-sha\n"))
+
+    driver = _driver(handler)
+    assert driver.revision(API_URI) is None
+
+
+def test_revision_requires_container_address():
+    driver = _driver(_list_handler)
+    with pytest.raises(DriverOperationInvalid):
+        driver.revision("env://vps1/docker/project/muutto365/service/api")
 
 
 def test_describe_reports_lifecycle_fields():
