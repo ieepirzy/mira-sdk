@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "miraasdk"
-version = "0.2.0"
+version = "0.1.1"
 description = "Client SDK for the Mira ecosystem: run-scoped OTLP telemetry (miraasdk.telemetry) and a standalone environment driver toolkit (miraasdk.driver) for Docker/Portainer/Kubernetes discovery, reporting into MiraRun's environment model."
 authors = [
   { name = "ieepirzy", email = "nervy_colder_1m@icloud.com" }
