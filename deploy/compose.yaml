@@ -35,9 +35,13 @@ services:
       - "${MIRA_PROXY_WG_BIND:?set to this host's WireGuard address}:2375:2375"
 
   driver:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    # CI-built image, not a build from this checkout. The host deploying this
+    # stack pulls what CI already built and tested; it compiles nothing.
+    # Tagged through MIRA_DRIVER_IMAGE_TAG so a host can be pinned from
+    # Portainer's env var UI without editing this file — unset for `latest`
+    # (what main publishes), or `sha-<commit>` to pin or roll back. Layer
+    # deploy/compose.ci.yaml on top to build from a checkout instead.
+    image: ghcr.io/ieepirzy/mira-driver:${MIRA_DRIVER_IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       - socket-proxy

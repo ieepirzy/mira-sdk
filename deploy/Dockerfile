@@ -1,7 +1,12 @@
-# Build context is the repository root (see deploy/compose.yaml) so the
-# image installs the SDK from this checkout — the running driver is always
-# the code in the branch Portainer GitOps pulled, never a possibly-older
-# PyPI release.
+# Build context is the repository root (see deploy/compose.yaml) so the image
+# installs the SDK from this checkout rather than from PyPI — the running
+# driver is the code in this repository, never a possibly-older release.
+#
+# "This checkout" used to mean the one Portainer GitOps pulled onto the host,
+# because the host built the image itself. It now means CI's checkout of main:
+# deploy/compose.yaml pulls ghcr.io/ieepirzy/mira-driver, which
+# .github/workflows/publish.yml builds from here. The PyPI-vs-source point is
+# unchanged; what moved is which machine does the install.
 FROM python:3.12-slim
 
 WORKDIR /opt/miraasdk
