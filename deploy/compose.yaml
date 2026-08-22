@@ -41,7 +41,7 @@ services:
     # Portainer's env var UI without editing this file — unset for `latest`
     # (what main publishes), or `sha-<commit>` to pin or roll back. Layer
     # deploy/compose.ci.yaml on top to build from a checkout instead.
-    image: ghcr.io/ieepirzy/mira-driver:${MIRA_DRIVER_IMAGE_TAG:-latest}
+    image: ${MIRA_DRIVER_IMAGE:-ghcr.io/ieepirzy/mira-driver:${MIRA_DRIVER_IMAGE_TAG:-latest}}
     restart: unless-stopped
     depends_on:
       - socket-proxy

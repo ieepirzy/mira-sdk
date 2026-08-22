@@ -37,8 +37,13 @@ built**, selected by `MIRA_DRIVER_IMAGE_TAG`:
 | `MIRA_DRIVER_IMAGE_TAG` | What the host runs |
 |---|---|
 | unset (default `latest`) | the newest `main` build |
-| `sha-<commit>` | that exact commit, immutably |
+| `sha-<commit>` | that commit's build — the usual rollback target |
 | `vX.Y.Z` | that release |
+
+GHCR does not enforce tag immutability, so a rerun can move a `sha-` tag.
+Where a deploy must be byte-for-byte reproducible, set `MIRA_DRIVER_IMAGE`
+to a digest (`ghcr.io/ieepirzy/mira-driver@sha256:...`) instead — it takes
+precedence over `MIRA_DRIVER_IMAGE_TAG`.
 
 The practical consequence for this runbook: a merge to `main` is not live
 until `publish.yml` has finished. Redeploying before it does re-pulls the
