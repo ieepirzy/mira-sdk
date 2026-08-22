@@ -1,0 +1,25 @@
+# Build override — layered on top of compose.yaml, never deployed.
+#
+#   docker compose -f deploy/compose.yaml -f deploy/compose.ci.yaml up -d --build
+#
+# compose.yaml references the published GHCR image so the host deploying this
+# stack never builds. This file puts `build:` back for anyone who needs to
+# exercise the working tree rather than the last published image.
+#
+# `image:` is overridden too, and that is not cosmetic. Compose tags a build
+# with the service's `image:` value, and this override is most often used on a
+# host that also runs the driver, so inheriting the base file's name would let
+# a local `--build` overwrite the `ghcr.io/ieepirzy/mira-driver:latest` tag
+# that the next `docker compose up` resolves locally before it ever consults
+# the registry — a hand-built image silently becoming what the host reports
+# from.
+#
+# socket-proxy is not here: it runs an upstream image and has no build.
+
+services:
+
+  driver:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: mira-driver:${COMPOSE_PROJECT_NAME:-local}

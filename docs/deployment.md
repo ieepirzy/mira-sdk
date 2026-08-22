@@ -8,8 +8,9 @@ the same runbook with a different `MIRA_DRIVER_TARGET_REFERENCE` and
 WireGuard bind address.
 
 Verified before this runbook was written (2026-08-07, without a Docker
-daemon in the verifying environment, so no image build — that happens on
-the VPS at deploy time): the full test suite passes on the pinned branch;
+daemon in the verifying environment, so no image build — at the time that
+happened on the VPS at deploy time; it now happens in CI, see below): the
+full test suite passes on the pinned branch;
 `docker compose config` renders `deploy/compose.yaml` with the exact
 variable set below; and `DriverProcessConfig.from_environ` + `build_runner`
 accept the rendered environment verbatim — admin sink on, mirarun sink
@@ -22,11 +23,32 @@ declaration exist in movingfirm-admin's `main.py` / `docker-compose.yml`
 
 One repo per stack is the house GitOps rule (the same one that split
 movingfirm-admin out of the backend stack, 2026-03). Portainer clones this
-repo and runs Compose against `deploy/compose.yaml`; the build context is
-the repo root (see `deploy/Dockerfile`'s header), so **the running driver
-is always the code on the branch Portainer pulled** — never a
-possibly-older PyPI release of `miraasdk`. Redeploys are "Pull and
-redeploy" in the stack view (or the stack webhook), not SSH.
+repo and runs Compose against `deploy/compose.yaml`. Redeploys are "Pull
+and redeploy" in the stack view (or the stack webhook), not SSH.
+
+Portainer no longer *builds* anything. `deploy/compose.yaml` references
+`ghcr.io/ieepirzy/mira-driver`, which `.github/workflows/publish.yml`
+builds from the repo root on every push to `main`. The driver is still
+installed from source rather than from a possibly-older PyPI release of
+`miraasdk` — that has not changed — but "the code on the branch Portainer
+pulled" is no longer the right mental model. **What runs is the image CI
+built**, selected by `MIRA_DRIVER_IMAGE_TAG`:
+
+| `MIRA_DRIVER_IMAGE_TAG` | What the host runs |
+|---|---|
+| unset (default `latest`) | the newest `main` build |
+| `sha-<commit>` | that commit's build — the usual rollback target |
+| `vX.Y.Z` | that release |
+
+GHCR does not enforce tag immutability, so a rerun can move a `sha-` tag.
+Where a deploy must be byte-for-byte reproducible, set `MIRA_DRIVER_IMAGE`
+to a digest (`ghcr.io/ieepirzy/mira-driver@sha256:...`) instead — it takes
+precedence over `MIRA_DRIVER_IMAGE_TAG`.
+
+The practical consequence for this runbook: a merge to `main` is not live
+until `publish.yml` has finished. Redeploying before it does re-pulls the
+*previous* `latest`, silently, with no error — check the workflow run
+before assuming a redeploy picked up a fix.
 
 ## Prerequisites (one-time, before registering the stack)
 
@@ -77,8 +99,17 @@ receiving pushed reports (the "reported" reachability path is for hosts
 mirarun cannot reach). An empty string is treated as unset by
 `process.py`, so the compose defaults are safe.
 
-Then **Deploy the stack**. Portainer builds the driver image from the
-cloned checkout on first deploy; expect a couple of minutes.
+Then **Deploy the stack**. Portainer pulls
+`ghcr.io/ieepirzy/mira-driver` rather than building it, so the first deploy
+is a pull, not a couple of minutes of build. Two things must be true first:
+the image has to have been published at least once (check
+`publish.yml`'s runs), and if the package is private the host needs
+registry credentials for `ghcr.io` — a classic PAT with `read:packages`,
+registered under Portainer's Registries and distinct from the PAT used to
+clone the repo. A GHCR package is private on creation and is not made
+public merely by belonging to a public repository; check the package's
+visibility after the first publish and either flip it to public or leave
+the credential in place.
 
 Optionally enable GitOps polling on the stack so a merge to `main`
 redeploys automatically; otherwise "Pull and redeploy" manually after
@@ -117,16 +148,24 @@ merges that touch `miraasdk/` or `deploy/`.
   Container-to-host traffic to a Docker-published port does not normally
   traverse UFW's default-deny input chain, but if a firewall change lands
   on the box, this is the first symptom to re-check.
-- **Stack deploy fails with a build error referencing `miraasdk/` (or a
-  stale `mira_sdk/`)** — the compose path was registered without the
-  repo-root build context reaching Portainer's clone (compose resolves
-  `context: ..` relative to `deploy/`), or a future rename changes the
-  package directory again. The fix is in the repo, not in Portainer
-  settings: `deploy/Dockerfile` must `COPY` whatever the package directory
-  is actually called on the pinned branch. (The rename from `mira_sdk/` to
+- **Stack deploy fails on `docker pull` — `denied` or `not found`** —
+  the replacement for the old build-error failure mode, since Portainer no
+  longer builds. `not found` means `publish.yml` has not successfully run
+  for this tag yet (a brand-new package, or a `MIRA_DRIVER_IMAGE_TAG`
+  naming a commit that was never published). `denied`/`unauthorized` means
+  the package is private and the host has no `ghcr.io` credential — see
+  "Deploy the stack" above. Neither is fixed in `deploy/`.
+- **A redeploy did not pick up a merged fix** — `latest` moves only when
+  `publish.yml` finishes, and it now moves *after* both the image build and
+  the retag step. Check the workflow run for the merge commit before
+  looking anywhere else; a redeploy that races it re-pulls the previous
+  image and reports success.
+- **A build error referencing `miraasdk/` (or a stale `mira_sdk/`)** — this
+  can no longer happen on the deploy host, but it can now fail
+  `publish.yml` instead. `deploy/Dockerfile` must `COPY` whatever the
+  package directory is actually called. (The rename from `mira_sdk/` to
   `miraasdk/` — PR #3 — updated `deploy/Dockerfile` in the same commit, so
-  this failure mode only recurs if a *future* rename ships without its
-  Dockerfile half.)
+  this only recurs if a *future* rename ships without its Dockerfile half.)
 
 ## What this deliberately does not do
 

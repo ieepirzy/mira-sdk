@@ -1,0 +1,81 @@
+name: Publish driver image
+
+# deploy/compose.yaml consumes this image rather than building on the host
+# that runs the driver. This workflow is what produces it.
+#
+# Distinct from release.yml, which publishes the Python package to PyPI. The
+# SDK and the driver are shipped through different channels to different
+# consumers; this one is only about the container the host stack pulls.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Not on pull_request, deliberately: a PR build would either publish
+# unreviewed code under the tag deployed hosts follow, or produce an image
+# nobody pulls.
+
+concurrency:
+  # Two pushes to main in quick succession would otherwise race to tag
+  # `latest`, and the loser's digest is the one that sticks.
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    # ubuntu-latest is correct here and would not be in the movingfirm repos:
+    # this repository is public, so GitHub's hosted minutes are free and
+    # unlimited. The private repos have to use self-hosted runners because the
+    # account's included minutes are exhausted and their hosted jobs are simply
+    # never assigned a runner.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The only write this workflow needs. `contents` stays read so a
+      # compromised build step cannot push to the repository.
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # Not ${{ github.repository }}: the repository is mira-sdk and the
+          # image is the driver, one of several things this repo ships. Same
+          # split as the miragen repo publishing ghcr.io/ieepirzy/miragend.
+          images: ghcr.io/${{ github.repository_owner }}/mira-driver
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          # The Dockerfile is under deploy/ but the build context is the repo
+          # root — it installs the SDK package itself, which lives there.
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

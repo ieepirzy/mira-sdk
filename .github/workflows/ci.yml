@@ -4,6 +4,9 @@ on:
   push:
     branches: ["main"]
   pull_request:
+  # Callable so publish.yml can gate the driver image on this suite rather
+  # than duplicating it.
+  workflow_call:
 
 jobs:
   test:
